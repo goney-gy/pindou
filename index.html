@@ -63,8 +63,19 @@ body{background:#F3F4F6;color:#1F2937;font-family:-apple-system,BlinkMacSystemFo
 .action-bar{display:flex;margin-top:4px}
 .action-bar .btn-action+.btn-action{margin-left:10px}
 .footer-note{text-align:center;font-size:11px;color:#9CA3AF;padding:20px 0 6px}
+[hidden]{display:none!important}
 .toast{position:fixed;left:50%;bottom:80px;transform:translateX(-50%);background:rgba(17,24,39,.9);color:#FFF;font-size:13px;padding:10px 18px;border-radius:8px;z-index:99;animation:fade .2s}
 @keyframes fade{from{opacity:0}to{opacity:1}}
+.save-mask{position:fixed;inset:0;background:rgba(17,24,39,.55);display:flex;align-items:center;justify-content:center;z-index:90;padding:20px}
+.save-card{background:#FFF;border-radius:16px;width:100%;max-width:380px;padding:18px;box-sizing:border-box}
+.save-title{font-size:16px;font-weight:600;color:#111827;margin-bottom:12px;text-align:center}
+.save-sheet{width:100%;border:1px dashed #D1D5DB;border-radius:10px;padding:16px;box-sizing:border-box;display:flex;flex-direction:column;align-items:center;gap:10px}
+.save-sheet img{max-width:100%;max-height:46vh;border-radius:8px}
+.save-sheet .sheet-name{font-size:12px;color:#6B7280;word-break:break-all;text-align:center}
+.save-hint{font-size:12px;color:#9CA3AF;margin:10px 4px;text-align:center;line-height:1.5}
+.save-actions{display:flex;gap:10px}
+.save-actions .btn{flex:1}
+.save-close{margin-top:12px;width:100%;background:#FFF;border:1px solid #D1D5DB;color:#374151;padding:11px;border-radius:10px;font-size:14px}
 @media (min-width:600px){.canvas-wrap{height:520px}}
 </style>
 </head>
@@ -135,6 +146,19 @@ body{background:#F3F4F6;color:#1F2937;font-family:-apple-system,BlinkMacSystemFo
   </div>
 
   <footer class="footer-note">所有图片仅在本机处理，不会上传任何服务器</footer>
+</div>
+
+<div class="save-mask" id="saveMask" hidden>
+  <div class="save-card">
+    <div class="save-title" id="saveTitle">保存文件</div>
+    <div class="save-sheet" id="saveSheet"></div>
+    <div class="save-hint" id="saveHint"></div>
+    <div class="save-actions">
+      <button class="btn btn-action" id="saveDownload">下载文件</button>
+      <button class="btn btn-action btn-ghost" id="saveShare" hidden>分享</button>
+    </div>
+    <button class="save-close" id="saveClose">关闭</button>
+  </div>
 </div>
 
 <script>
@@ -978,6 +1002,82 @@ function scheduleRender() {
   state.rafId=requestAnimationFrame(()=>{ state.rafId=0; render(); });
 }
 
+const saveMask=$('saveMask'), saveSheet=$('saveSheet'), saveTitle=$('saveTitle'), saveHint=$('saveHint'), saveDownload=$('saveDownload'), saveShare=$('saveShare'), saveClose=$('saveClose');
+let saveBlob=null, saveName='';
+function isMobile() {
+  return /Android|iPhone|iPad|iPod|Mobile|PlayBook|Silk/i.test(navigator.userAgent);
+}
+function canShareFiles() {
+  return !!(navigator.share && navigator.canShare && navigator.canShare({ files: [new File(['x'],'x.txt')] }));
+}
+function openSaveSheet(title,blob,name,hint,previewUrl) {
+  saveBlob=blob; saveName=name;
+  saveTitle.textContent=title;
+  saveHint.textContent=hint||'';
+  saveSheet.innerHTML='';
+  if (previewUrl) {
+    const img=document.createElement('img');
+    img.src=previewUrl;
+    img.alt='图纸预览';
+    saveSheet.appendChild(img);
+  }
+  const nm=document.createElement('div');
+  nm.className='sheet-name';
+  nm.textContent=name;
+  saveSheet.appendChild(nm);
+  saveShare.hidden=!canShareFiles();
+  saveMask.hidden=false;
+}
+function closeSaveSheet() {
+  saveMask.hidden=true;
+  saveSheet.innerHTML='';
+  if (saveBlob && saveBlob.url) URL.revokeObjectURL(saveBlob.url);
+  saveBlob=null;
+}
+saveDownload.addEventListener('click',()=>{
+  if (!saveBlob) return;
+  const a=document.createElement('a');
+  a.href=saveBlob.url;
+  a.download=saveName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  toast('已开始下载，请在浏览器下载记录中查看');
+});
+saveShare.addEventListener('click',async()=>{
+  if (!saveBlob || !navigator.share) return;
+  try {
+    await navigator.share({
+      title: saveName,
+      files: [new File([saveBlob.file], saveName, { type: saveBlob.file.type })],
+    });
+  } catch (err) {
+    if (err && err.name !== 'AbortError') toast('分享失败');
+  }
+});
+saveClose.addEventListener('click',closeSaveSheet);
+saveMask.addEventListener('click',e=>{ if (e.target===saveMask) closeSaveSheet(); });
+
+function renderExportSheet(canvas,baseName) {
+  const name=`${baseName}.png`;
+  canvas.toBlob(blob=>{
+    if (!blob) { toast('导出失败，请重试'); return; }
+    const url=URL.createObjectURL(blob);
+    // 先触发浏览器原生下载，下载开始后再弹出保存弹窗（手机端补充长按存相册 / 分享）
+    const a=document.createElement('a');
+    a.href=url;
+    a.download=name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    if (isMobile()) {
+      setTimeout(()=>openSaveSheet('保存图纸',{ url, file: blob },name,'图纸已开始下载；可长按下方图片保存到相册，或点按钮再次下载 / 分享',url),400);
+    } else {
+      setTimeout(()=>URL.revokeObjectURL(url),2000);
+    }
+  },'image/png');
+}
+
 function exportPng() {
   if (!state.result) return;
   const opts={...state.drawOpts,showCellNumbers:true};
@@ -999,10 +1099,7 @@ function exportPng() {
       drawOpts.diagonalSet=new Set(state.audit.diagonalOnly);
     }
     drawSheet(octx,layout,state.result,drawOpts);
-    const a=document.createElement('a');
-    a.href=off.toDataURL('image/png');
-    a.download=`拼豆图纸_${state.result.gridSize}x${state.result.gridSize}.png`;
-    a.click();
+    renderExportSheet(off,`拼豆图纸_${state.result.gridSize}x${state.result.gridSize}`);
   } catch (err) {
     toast('导出失败，请重试');
   }
@@ -1012,11 +1109,20 @@ function exportCsv() {
   if (!state.result) return;
   const csv=buildStatsCSV(state.result.pixelData,state.colorSystem);
   const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const name=`拼豆清单_${state.result.gridSize}x${state.result.gridSize}.csv`;
+  // 先触发浏览器原生下载，下载开始后再弹出保存弹窗（手机端可再次下载或分享）
   const a=document.createElement('a');
-  a.href=URL.createObjectURL(blob);
-  a.download=`拼豆清单_${state.result.gridSize}x${state.result.gridSize}.csv`;
+  a.href=url;
+  a.download=name;
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(a.href);
+  a.remove();
+  if (isMobile()) {
+    setTimeout(()=>openSaveSheet('保存物料清单',{ url, file: blob },name,'清单已开始下载；CSV 适合用 Excel / WPS 打开，可点按钮再次下载或分享',null),400);
+  } else {
+    setTimeout(()=>URL.revokeObjectURL(url),2000);
+  }
 }
 
 chooseBtn.addEventListener('click',()=>fileInput.click());
