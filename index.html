@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
+  <meta name="description" content="拼豆图纸GO：上传图片一键生成带色号的拼豆图纸，网格、色号、坐标、用量清单齐全，全部在本地浏览器处理，不上传任何服务器。" />
+  <meta name="theme-color" content="#6366F1" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <title>拼豆图纸GO</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div class="page" id="page">
+    <header class="hero">
+      <h1 class="hero-title">拼豆图纸GO</h1>
+      <p class="hero-sub">上传图片 → 一键生成带色号的拼豆图纸，全部本地处理</p>
+    </header>
+
+    <input type="file" id="fileInput" accept="image/*" hidden />
+
+    <!-- 上传区 -->
+    <div class="card upload-card" id="uploadCard" role="button" tabindex="0">
+      <img id="uploadPreview" class="upload-preview" alt="已选图片" hidden />
+      <div class="upload-placeholder" id="uploadPlaceholder">
+        <div class="upload-icon">＋</div>
+        <div class="upload-text">点击选择图片</div>
+        <div class="upload-hint">手机 / 平板 / 电脑浏览器 · 支持拖拽与粘贴</div>
+      </div>
+    </div>
+    <button class="btn btn-primary" id="chooseBtn" type="button">选择图片</button>
+
+    <!-- 设置区 -->
+    <div class="card">
+      <div class="section-title">网格尺寸</div>
+      <div class="chips" data-chips-group></div>
+      <div class="custom-row">
+        <input class="custom-input" id="customInput" type="number" inputmode="numeric" placeholder="自定义 8~150" />
+        <button class="custom-btn" id="customApply" type="button">应用</button>
+      </div>
+
+      <div class="section-title">色号系统</div>
+      <div class="chips" data-chips-group></div>
+
+      <div class="section-title">颜色匹配</div>
+      <div class="chips" data-chips-group></div>
+
+      <div class="section-title">最多用色（限色收敛）</div>
+      <div class="chips" data-chips-group></div>
+
+      <div class="section-title">图纸选项</div>
+      <label class="opt-row"><span>近白区域留空（不买豆）</span><input type="checkbox" data-key="blankWhite" checked /></label>
+      <label class="opt-row"><span>格内显示色号</span><input type="checkbox" data-key="showNumbers" checked /></label>
+      <label class="opt-row"><span>四周行列坐标</span><input type="checkbox" data-key="showCoords" checked /></label>
+      <label class="opt-row"><span>网格加重线（每 10 格）</span><input type="checkbox" data-key="showGrid" checked /></label>
+      <label class="opt-row"><span>底部色号用量统计</span><input type="checkbox" data-key="showStats" checked /></label>
+      <label class="opt-row"><span>标记孤立豆（结构检查）</span><input type="checkbox" data-key="highlight" /></label>
+    </div>
+
+    <button class="btn btn-generate" id="generateBtn" type="button">生成图纸</button>
+
+    <!-- 结果区 -->
+    <div class="card result-card" id="resultCard" hidden>
+      <div class="result-tabs" id="tabs">
+        <button class="tab tab-active" data-mode="pattern" type="button">图纸</button>
+        <button class="tab" data-mode="original" type="button">原图对比</button>
+        <button class="tab" data-mode="blank" type="button">只留空格</button>
+      </div>
+      <div class="canvas-wrap" id="canvasWrap">
+        <canvas id="sheetCanvas"></canvas>
+      </div>
+      <div class="result-info">
+        <span id="gridInfo"></span>
+        <span class="zoom-hint">滚轮 / 双指缩放 · 拖拽平移</span>
+      </div>
+      <div class="stats-block" id="statsBlock">
+        <div class="stats-title">色号用量清单</div>
+        <div class="stats-grid" id="statsList"></div>
+      </div>
+      <div class="audit-block" id="auditText" hidden></div>
+    </div>
+
+    <!-- 操作栏 -->
+    <div class="action-bar" id="actionBar" hidden>
+      <button class="btn btn-action" data-action="png" type="button">导出图纸 PNG</button>
+      <button class="btn btn-action btn-ghost" data-action="csv" type="button">导出物料清单 CSV</button>
+    </div>
+
+    <footer class="footer-note">所有图片仅在本机处理，不会上传任何服务器</footer>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="js/palette.js"></script>
+  <script src="js/pattern.js"></script>
+  <script src="js/viewer.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
