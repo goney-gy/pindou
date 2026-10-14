@@ -155,7 +155,7 @@ body{background:#F3F4F6;color:#1F2937;font-family:-apple-system,BlinkMacSystemFo
     <div class="save-hint" id="saveHint"></div>
     <div class="save-actions">
       <button class="btn btn-action" id="saveDownload">下载文件</button>
-      <button class="btn btn-action btn-ghost" id="saveShare" hidden>分享</button>
+      <button class="btn btn-action" id="saveShare" hidden>保存 / 分享</button>
     </div>
     <button class="save-close" id="saveClose">关闭</button>
   </div>
@@ -1025,7 +1025,11 @@ function openSaveSheet(title,blob,name,hint,previewUrl) {
   nm.className='sheet-name';
   nm.textContent=name;
   saveSheet.appendChild(nm);
-  saveShare.hidden=!canShareFiles();
+  const canShare=canShareFiles();
+  saveShare.hidden=!canShare;
+  saveDownload.hidden=!isMobile(); // 桌面端不弹面板，无需此按钮
+  if (canShare) saveDownload.classList.add('btn-ghost');
+  else saveDownload.classList.remove('btn-ghost');
   saveMask.hidden=false;
 }
 function closeSaveSheet() {
@@ -1051,8 +1055,9 @@ saveShare.addEventListener('click',async()=>{
       title: saveName,
       files: [new File([saveBlob.file], saveName, { type: saveBlob.file.type })],
     });
+    closeSaveSheet();
   } catch (err) {
-    if (err && err.name !== 'AbortError') toast('分享失败');
+    if (err && err.name !== 'AbortError') toast('未完成保存/分享，请尝试下载文件');
   }
 });
 saveClose.addEventListener('click',closeSaveSheet);
@@ -1063,16 +1068,16 @@ function renderExportSheet(canvas,baseName) {
   canvas.toBlob(blob=>{
     if (!blob) { toast('导出失败，请重试'); return; }
     const url=URL.createObjectURL(blob);
-    // 先触发浏览器原生下载，下载开始后再弹出保存弹窗（手机端补充长按存相册 / 分享）
-    const a=document.createElement('a');
-    a.href=url;
-    a.download=name;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
     if (isMobile()) {
-      setTimeout(()=>openSaveSheet('保存图纸',{ url, file: blob },name,'图纸已开始下载；可长按下方图片保存到相册，或点按钮再次下载 / 分享',url),400);
+      // 手机端：直接弹保存面板，用系统保存/分享选择保存位置
+      openSaveSheet('保存图纸',{ url, file: blob },name,'可长按图片保存到相册，或点「保存 / 分享」选择保存位置；下载则存到系统下载目录',url);
     } else {
+      const a=document.createElement('a');
+      a.href=url;
+      a.download=name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
       setTimeout(()=>URL.revokeObjectURL(url),2000);
     }
   },'image/png');
@@ -1111,16 +1116,16 @@ function exportCsv() {
   const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
   const url=URL.createObjectURL(blob);
   const name=`拼豆清单_${state.result.gridSize}x${state.result.gridSize}.csv`;
-  // 先触发浏览器原生下载，下载开始后再弹出保存弹窗（手机端可再次下载或分享）
-  const a=document.createElement('a');
-  a.href=url;
-  a.download=name;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
   if (isMobile()) {
-    setTimeout(()=>openSaveSheet('保存物料清单',{ url, file: blob },name,'清单已开始下载；CSV 适合用 Excel / WPS 打开，可点按钮再次下载或分享',null),400);
+    // 手机端：直接弹保存面板，用系统保存/分享选择保存位置
+    openSaveSheet('保存物料清单',{ url, file: blob },name,'CSV 适合用 Excel / WPS 打开；点「保存 / 分享」选择保存位置，或下载存到系统下载目录',null);
   } else {
+    const a=document.createElement('a');
+    a.href=url;
+    a.download=name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
     setTimeout(()=>URL.revokeObjectURL(url),2000);
   }
 }
