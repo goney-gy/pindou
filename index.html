@@ -79,6 +79,15 @@ body{background:#F3F4F6;color:#1F2937;font-family:-apple-system,BlinkMacSystemFo
 .save-actions{display:flex;gap:10px}
 .save-actions .btn{flex:1}
 .save-close{margin-top:12px;width:100%;background:#FFF;border:1px solid #D1D5DB;color:#374151;padding:11px;border-radius:10px;font-size:14px}
+.legend-grid{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+.legend-item{display:flex;align-items:center;gap:8px;background:#F9FAFB;border:1px solid #EEF1F5;border-radius:10px;padding:8px 10px}
+.legend-item .swatch{width:34px;height:34px;border-radius:8px;flex-shrink:0;border:1px solid rgba(0,0,0,.08);margin-right:0}
+.legend-code{font-weight:600;font-size:13px;min-width:42px;color:#111827}
+.legend-hex{font-size:11px;color:#9CA3AF;min-width:62px;word-break:break-all}
+.legend-count{width:76px;height:34px;border:1px solid #E5E7EB;border-radius:8px;text-align:center;font-size:15px;font-weight:600;background:#FFF;outline:none;min-width:0}
+.legend-count:focus{border-color:#6366F1}
+.legend-unit{font-size:12px;color:#6B7280}
+.legend-note{font-size:12px;color:#9CA3AF;margin-top:10px;line-height:1.6}
 @media (min-width:600px){.canvas-wrap{height:520px}}
 </style>
 </head>
@@ -105,6 +114,10 @@ body{background:#F3F4F6;color:#1F2937;font-family:-apple-system,BlinkMacSystemFo
   <button class="btn btn-primary" id="chooseBtn">选择图片</button>
 
   <section class="card">
+    <div id="scopeBlock" hidden>
+      <div class="section-title">识别范围</div>
+      <div class="chips" id="scopeChips"></div>
+    </div>
     <div class="section-title">网格尺寸</div>
     <div class="chips" id="sizeChips"></div>
     <div class="custom-row">
@@ -145,6 +158,11 @@ body{background:#F3F4F6;color:#1F2937;font-family:-apple-system,BlinkMacSystemFo
       <div class="stats-grid" id="statsGrid"></div>
     </div>
     <div class="audit-block" id="auditBlock" hidden></div>
+    <div class="legend-block" id="legendBlock" hidden>
+      <div class="stats-title">底部色标图例 · 色号与数量（可直接修改）</div>
+      <div class="legend-grid" id="legendGrid"></div>
+      <div class="legend-note">数量由图上标注文字 OCR 自动识别，首次识别需联网下载识别引擎（约 10MB），可能有个别误差，请核对后修改</div>
+    </div>
   </section>
 
   <div class="action-bar" id="actionBar" hidden>
@@ -809,9 +827,10 @@ function drawSheet(ctx,layout,data,opts) {
 
 const state = {
   gridSize:32, customSize:'', colorSystem:'MARD', match:'lab', maxColors:0, mode:'photo',
+  recogScope:'whole',
   opts:{ blankWhite:true, showNumbers:true, showCoords:true, showGrid:true, showStats:true, highlight:false },
   viewMode:'pattern', sourceImage:null, fileName:'',
-  result:null, audit:null, auditText:'', stats:[], layout:null, drawOpts:null,
+  result:null, legend:null, audit:null, auditText:'', stats:[], layout:null, drawOpts:null,
   view:null, fitScale:1, ctx:null, cssW:0, cssH:0, rafId:0,
 };
 const DPR = window.devicePixelRatio||1;
@@ -824,6 +843,8 @@ const modeTabs=document.querySelectorAll('.mode-tab');
 const resultCard=$('resultCard'), actionBar=$('actionBar'), gridInfo=$('gridInfo');
 const statsBlock=$('statsBlock'), statsGrid=$('statsGrid'), auditBlock=$('auditBlock');
 const canvas=$('sheetCanvas'), customInput=$('customInput'), customApply=$('customApply');
+const resultTabsEl=document.querySelector('.result-tabs'), canvasWrapEl=document.querySelector('.canvas-wrap');
+const legendBlock=$('legendBlock'), legendGrid=$('legendGrid'), scopeBlock=$('scopeBlock');
 
 function toast(msg) {
   const t=document.createElement('div');
@@ -845,6 +866,7 @@ function renderChips(el,items,getValue,onSet) {
 }
 
 function refresh() {
+  renderChips($('scopeChips'),[{v:'whole',label:'整张图纸'},{v:'legend',label:'底部色标图例（色号+数量）'}],()=>state.recogScope,v=>{state.recogScope=v;if(state.mode==='sheet')uploadHint.textContent=v==='legend'?'将识别图片底部的色块与标注数量（OCR），请确保图例位于图片最底部且清晰':'图纸应平整、格子对齐，识别效果最好';if(state.result||state.legend)generate();});
   renderChips($('sizeChips'),[{v:16,label:'16×16'},{v:24,label:'24×24'},{v:32,label:'32×32'},{v:48,label:'48×48'},{v:56,label:'56×56'},{v:64,label:'64×64'},{v:100,label:'100×100'}],()=>state.gridSize,v=>{state.gridSize=v;state.customSize='';customInput.value='';if(state.result)generate();});
   renderChips($('systemChips'),[{v:'MARD',label:'MARD 221色'},{v:'COCO',label:'COCO'},{v:'漫漫',label:'漫漫'},{v:'盼盼',label:'盼盼'},{v:'咪小窝',label:'咪小窝'}],()=>state.colorSystem,v=>{state.colorSystem=v;if(state.result)generate();});
   renderChips($('matchChips'),[{v:'lab',label:'Lab 感知'},{v:'rgb',label:'RGB 距离'}],()=>state.match,v=>{state.match=v;if(state.result)generate();});
@@ -861,6 +883,8 @@ function readImage(file) {
     uploadPreview.hidden=false;
     uploadPlaceholder.hidden=true;
     state.result=null;
+    state.legend=null;
+    legendBlock.hidden=true;
     resultCard.hidden=true;
     actionBar.hidden=true;
   };
@@ -916,6 +940,7 @@ function renderStats() {
 
 function generate() {
   if (!state.sourceImage) { toast('请先选择图片'); return; }
+  if (state.mode==='sheet' && state.recogScope==='legend') { generateLegend(); return; }
   const n=state.gridSize;
   const isSheet = state.mode==='sheet';
   generateBtn.disabled=true;
@@ -940,11 +965,13 @@ function generate() {
       }
       if (state.maxColors>0) pixelData=limitColors(pixelData,state.maxColors,state.match);
       state.result={gridSize:n,pixelData};
+      state.legend=null;
       buildDrawOpts();
       buildStats();
       state.layout=computeLayout(state.result,state.drawOpts,28);
       resultCard.hidden=false;
       actionBar.hidden=false;
+      showGridResultView(true);
       renderStats();
       initCanvas();
       render();
@@ -1000,9 +1027,9 @@ function setMode(mode) {
   modeTabs.forEach(t=>t.classList.toggle('mode-tab-active',t.dataset.mode===mode));
   const isSheet=mode==='sheet';
   if (isSheet) {
-    heroSub.textContent='上传拼豆图纸图片 → 自动识别每格豆色并标注色号，全部本机处理';
+    heroSub.textContent='上传拼豆图纸图片 → 可识别整张图纸，或只识别底部色标图例与标注数量，全部本机处理';
     uploadText.textContent='点击上传图纸图片';
-    uploadHint.textContent='图纸应平整、格子对齐，识别效果最好';
+    uploadHint.textContent=state.recogScope==='legend'?'将识别图片底部的色块与标注数量（OCR），请确保图例位于图片最底部且清晰':'图纸应平整、格子对齐，识别效果最好';
     generateBtn.textContent='识别图纸';
   } else {
     heroSub.textContent='上传图片 → 一键生成带色号的拼豆图纸，全部本机处理';
@@ -1010,7 +1037,10 @@ function setMode(mode) {
     uploadHint.textContent='支持相册选图与拍照';
     generateBtn.textContent='生成图纸';
   }
+  scopeBlock.hidden=!isSheet;
   state.result=null;
+  state.legend=null;
+  legendBlock.hidden=true;
   resultCard.hidden=true;
   actionBar.hidden=true;
 }
@@ -1183,15 +1213,11 @@ function exportPng() {
   }
 }
 
-function exportCsv() {
-  if (!state.result) return;
-  const csv=buildStatsCSV(state.result.pixelData,state.colorSystem);
-  const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
+function offerBlob(blob,name,title,hint) {
   const url=URL.createObjectURL(blob);
-  const name=`拼豆清单_${state.result.gridSize}x${state.result.gridSize}.csv`;
   if (isMobile()) {
     // 手机端：直接弹保存面板，用系统保存/分享选择保存位置
-    openSaveSheet('保存物料清单',{ url, file: blob },name,'CSV 适合用 Excel / WPS 打开；点「保存 / 分享」选择保存位置，或下载存到系统下载目录',null);
+    openSaveSheet(title,{ url, file: blob },name,hint||'',null);
   } else {
     const a=document.createElement('a');
     a.href=url;
@@ -1201,6 +1227,298 @@ function exportCsv() {
     a.remove();
     setTimeout(()=>URL.revokeObjectURL(url),2000);
   }
+}
+
+function exportCsv() {
+  if (state.legend) { exportLegendCsv(); return; }
+  if (!state.result) return;
+  const csv=buildStatsCSV(state.result.pixelData,state.colorSystem);
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
+  offerBlob(blob,`拼豆清单_${state.result.gridSize}x${state.result.gridSize}.csv`,'保存物料清单','CSV 适合用 Excel / WPS 打开；点「保存 / 分享」选择保存位置，或下载存到系统下载目录');
+}
+
+// ========== 底部色标图例识别（色号 + OCR 数量） ==========
+let legendCanvas=null, ocrWorker=null;
+
+function findHexByCode(code) {
+  const c=String(code||'').toUpperCase().trim();
+  if (!c) return null;
+  return ALL_HEX.find(h=>getColorKeyByHex(h,state.colorSystem).toUpperCase()===c)||null;
+}
+
+function hasDark(d,W,rect) {
+  const x2=Math.min(rect.left+rect.width-1,W-1), y2=rect.top+rect.height-1;
+  let n=0;
+  for (let y=Math.max(0,rect.top); y<=y2 && y>=0; y++) {
+    for (let x=Math.max(0,rect.left); x<=x2 && x>=0; x++) {
+      const i=(y*W+x)*4;
+      if (Math.max(d[i],d[i+1],d[i+2])<=105 && ++n>=12) return true;
+    }
+  }
+  return false;
+}
+
+function extractLegendSwatches() {
+  const img=state.sourceImage;
+  const iw=img.naturalWidth, ih=img.naturalHeight;
+  const MAX=1600;
+  const sc=Math.min(1,MAX/Math.max(iw,ih));
+  const W=Math.max(8,Math.round(iw*sc)), H=Math.max(8,Math.round(ih*sc));
+  const off=document.createElement('canvas');
+  off.width=W; off.height=H;
+  const octx=off.getContext('2d');
+  octx.drawImage(img,0,0,W,H);
+  const d=octx.getImageData(0,0,W,H).data;
+  const y0=Math.max(0,Math.round(H*0.75)); // 取图片底部 25% 作为图例候选区
+  const cntCol=new Int32Array(W), sR=new Int32Array(W), sG=new Int32Array(W), sB=new Int32Array(W);
+  const yTop=new Int32Array(W).fill(-1), yBot=new Int32Array(W).fill(-1);
+  for (let y=y0;y<H;y++) {
+    for (let x=0;x<W;x++) {
+      const i=(y*W+x)*4;
+      const r=d[i], g=d[i+1], b=d[i+2];
+      const mn=Math.min(r,g,b), mx=Math.max(r,g,b);
+      if (mx-mn<22) continue;          // 灰阶：跳过背景/边框
+      if (mx>=248 && mn>=236) continue; // 近白
+      const lum=0.299*r+0.587*g+0.114*b;
+      if (lum<28) continue;            // 近黑：文字
+      cntCol[x]++;
+      sR[x]+=r; sG[x]+=g; sB[x]+=b;
+      if (yTop[x]<0) yTop[x]=y;
+      yBot[x]=y;
+    }
+  }
+  let maxC=0;
+  for (let x=0;x<W;x++) if (cntCol[x]>maxC) maxC=cntCol[x];
+  if (maxC < Math.max(6,(H-y0)*0.1)) return null;
+  const thresh=Math.max(6,Math.round(maxC*0.35));
+  const runs=[];
+  let x0=-1;
+  for (let x=0;x<=W;x++) {
+    const ok = x<W && cntCol[x]>=thresh;
+    if (ok && x0<0) x0=x;
+    else if (!ok && x0>=0) {
+      if (x-x0 >= Math.max(5,Math.round(W*0.006))) runs.push({x0,x1:x-1});
+      x0=-1;
+    }
+  }
+  // 大色块内部再按颜色切分（两个色块紧贴时）
+  const seg=[];
+  for (const run of runs) {
+    const cols=[];
+    for (let x=run.x0;x<=run.x1;x++) cols.push({x,r:Math.round(sR[x]/cntCol[x]),g:Math.round(sG[x]/cntCol[x]),b:Math.round(sB[x]/cntCol[x])});
+    let st=0;
+    for (let k=1;k<=cols.length;k++) {
+      if (k===cols.length || Math.abs(cols[k].r-cols[k-1].r)+Math.abs(cols[k].g-cols[k-1].g)+Math.abs(cols[k].b-cols[k-1].b)>90) {
+        const part=cols.slice(st,k);
+        if (part.length>=Math.max(5,Math.round(W*0.006))) {
+          let R=0,G=0,B=0;
+          part.forEach(c=>{R+=c.r;G+=c.g;B+=c.b;});
+          const n=part.length;
+          seg.push({x0:part[0].x,x1:part[n-1].x,r:Math.round(R/n),g:Math.round(G/n),b:Math.round(B/n)});
+        }
+        st=k;
+      }
+    }
+  }
+  if (!seg.length) return null;
+  const swatches=[];
+  for (let i=0;i<seg.length;i++) {
+    const s=seg[i];
+    if (s.x1-s.x0<4) continue;
+    let top=H, bottom=y0;
+    for (let x=s.x0;x<=s.x1;x++) {
+      if (yTop[x]>=0) { if (yTop[x]<top) top=yTop[x]; if (yBot[x]>bottom) bottom=yBot[x]; }
+    }
+    if (bottom<=top) continue;
+    // 文字区域：优先色块下方，其次右侧缝隙
+    let rect=null;
+    if (bottom+1 < H-2) {
+      const r0={left:Math.max(0,s.x0-2), top:bottom+1, width:Math.min(W,s.x1+2)-Math.max(0,s.x0-2), height:H-(bottom+1)};
+      if (r0.width>0 && r0.height>=6 && hasDark(d,W,r0)) rect=r0;
+    }
+    if (!rect && i<seg.length-1 && seg[i+1].x0-s.x1-1>=4) {
+      const rr={left:s.x1+1, top:Math.max(y0,top-3), width:seg[i+1].x0-s.x1-1, height:Math.min(H,bottom+3)-Math.max(y0,top-3)};
+      if (rr.width>0 && rr.height>=6 && hasDark(d,W,rr)) rect=rr;
+    }
+    swatches.push({x0:s.x0,x1:s.x1,top,bottom,hex:matchRgb(s.r,s.g,s.b,state.match),rect});
+  }
+  if (swatches.length<2) return null;
+  legendCanvas=off;
+  return swatches;
+}
+
+function loadTesseract() {
+  return new Promise((resolve,reject)=>{
+    if (window.Tesseract) { resolve(); return; }
+    const urls=[
+      'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js',
+      'https://unpkg.com/tesseract.js@5/dist/tesseract.min.js',
+      'https://registry.npmmirror.com/tesseract.js/5.1.1/files/dist/tesseract.min.js'
+    ];
+    let k=0;
+    const next=()=>{
+      if (k>=urls.length) { reject(new Error('ocr-load-fail')); return; }
+      const s=document.createElement('script');
+      s.src=urls[k++];
+      s.onload=()=>resolve();
+      s.onerror=()=>next();
+      document.head.appendChild(s);
+    };
+    next();
+  });
+}
+async function getOcrWorker() {
+  if (ocrWorker) return ocrWorker;
+  await loadTesseract();
+  ocrWorker=await Tesseract.createWorker('eng',1,{logger:m=>{
+    if (m.status==='recognizing text'||m.status==='loading language traineddata') {
+      const p=Math.round((m.progress||0)*100);
+      generateBtn.textContent='识别文字 '+p+'%…';
+    }
+  }});
+  await ocrWorker.setParameters({ tessedit_char_whitelist:'0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ', tessedit_pageseg_mode:'7' });
+  return ocrWorker;
+}
+async function ocrCrop(worker,canvas,rect) {
+  try {
+    const {data}=await worker.recognize(canvas,{rectangle:rect});
+    return data.text||'';
+  } catch (err) { return ''; }
+}
+
+function parseLegendText(raw) {
+  const text=(raw||'').replace(/\s+/g,' ').trim();
+  let count=null, code='';
+  const fence=text.match(/[×xX*]\s*(?:约)?\s*(\d{1,5})/);
+  if (fence) count=parseInt(fence[1],10);
+  else {
+    const unit=text.match(/(\d{1,5})\s*[个颗]/);
+    if (unit) count=parseInt(unit[1],10);
+    else {
+      const mc=text.match(/[A-Za-z]{1,3}\d{1,4}|\d{2,4}/);
+      const codeN = mc ? parseInt(mc[0].replace(/\D/g,'')||'0',10) : 0;
+      const nums=[...text.matchAll(/\d{1,5}/g)].map(m=>parseInt(m[0],10));
+      const cands=nums.filter(n=>String(n)!==String(codeN));
+      if (cands.length) {
+        const last=cands[cands.length-1];
+        if (last>=10) count=last;
+      }
+    }
+  }
+  const m2=text.match(/[A-Za-z]{1,3}\d{1,4}|\d{2,4}/);
+  if (m2) code=m2[0].toUpperCase();
+  return { code, count };
+}
+
+function mergeLegend(items) {
+  const map={}, order=[];
+  items.forEach(it=>{
+    const key=it.hex.toUpperCase();
+    if (!map[key]) {
+      map[key]={ hex:it.hex, code:it.code, count:(it.count==null||it.count==='')?0:Number(it.count)||0, unknown:(it.count==null||it.count==='') };
+      order.push(key);
+    } else {
+      if (it.count!=null&&it.count!=='') map[key].count+=Number(it.count)||0;
+      else map[key].unknown=true;
+    }
+  });
+  return order.map(k=>{ const o=map[k]; return { hex:o.hex, code:o.code, count:o.unknown?null:o.count }; })
+    .sort((a,b)=>getColorKeyByHex(a.hex,'MARD').localeCompare(getColorKeyByHex(b.hex,'MARD'),'en',{numeric:true}));
+}
+
+function showGridResultView(isGrid) {
+  legendBlock.hidden=isGrid;
+  resultTabsEl.hidden=!isGrid;
+  canvasWrapEl.hidden=!isGrid;
+  $('exportPng').hidden=!isGrid;
+  $('exportCsv').textContent=isGrid?'导出物料清单 CSV':'导出色号清单 CSV';
+}
+
+function updateLegendInfo() {
+  const items=state.legend||[];
+  let total=0, known=0;
+  items.forEach(it=>{ if (it.count!=null&&it.count!=='') { total+=Number(it.count)||0; known++; } });
+  gridInfo.textContent=`底部色标图例 · ${items.length} 种色号${known?` · 合计 ${total} 颗豆`:''}`;
+}
+
+function renderLegend() {
+  const items=state.legend||[];
+  legendGrid.innerHTML='';
+  items.forEach(it=>{
+    const row=document.createElement('div'); row.className='legend-item';
+    const sw=document.createElement('div'); sw.className='swatch'; sw.style.background=it.hex;
+    const code=document.createElement('span'); code.className='legend-code'; code.textContent=it.code;
+    const hexS=document.createElement('span'); hexS.className='legend-hex'; hexS.textContent=it.hex;
+    const inp=document.createElement('input');
+    inp.type='number'; inp.min=0; inp.inputMode='numeric'; inp.className='legend-count';
+    inp.value=it.count==null||it.count===''?'':it.count;
+    inp.addEventListener('input',()=>{
+      it.count=inp.value===''?null:Math.max(0,parseInt(inp.value,10)||0);
+      updateLegendInfo();
+    });
+    const unit=document.createElement('span'); unit.className='legend-unit'; unit.textContent='颗';
+    row.appendChild(sw); row.appendChild(code); row.appendChild(hexS); row.appendChild(inp); row.appendChild(unit);
+    legendGrid.appendChild(row);
+  });
+  updateLegendInfo();
+}
+
+function generateLegend() {
+  if (!state.sourceImage) { toast('请先选择图片'); return; }
+  const swatches=extractLegendSwatches();
+  if (!swatches) { toast('未在图片底部找到色标图例，请确认图例位于图片最底部'); return; }
+  generateBtn.disabled=true;
+  generateBtn.textContent='识别图例颜色…';
+  state.result=null;
+  state.legend=swatches.map(s=>({ hex:s.hex, code:getColorKeyByHex(s.hex,state.colorSystem), count:null }));
+  state.legend=mergeLegend(state.legend);
+  statsBlock.hidden=true;
+  auditBlock.hidden=true;
+  resultCard.hidden=false;
+  actionBar.hidden=false;
+  showGridResultView(false);
+  renderLegend();
+  (async()=>{
+    try {
+      const worker=await getOcrWorker();
+      for (let i=0;i<swatches.length;i++) {
+        if (!swatches[i].rect) continue;
+        generateBtn.textContent=`识别文字 ${i+1}/${swatches.length}…`;
+        await new Promise(r=>setTimeout(r,0));
+        const text=await ocrCrop(worker,legendCanvas,swatches[i].rect);
+        const parsed=parseLegendText(text);
+        if (parsed.count!=null) {
+          const hit=state.legend.find(it=>it.hex.toUpperCase()===swatches[i].hex.toUpperCase());
+          if (hit) hit.count=parsed.count;
+        }
+        if (parsed.code) {
+          const h=findHexByCode(parsed.code);
+          if (h) {
+            const hit=state.legend.find(it=>it.hex.toUpperCase()===swatches[i].hex.toUpperCase());
+            if (hit) { hit.hex=h; hit.code=parsed.code; }
+          }
+        }
+        renderLegend();
+        await new Promise(r=>setTimeout(r,0));
+      }
+      toast('图例识别完成，请核对数量');
+    } catch (err) {
+      toast('OCR 未加载成功，已按颜色生成清单，数量可手动填写');
+    } finally {
+      generateBtn.disabled=false;
+      generateBtn.textContent='识别图例';
+    }
+  })();
+}
+
+function exportLegendCsv() {
+  const items=state.legend||[];
+  const total=items.reduce((s,it)=>s+(Number(it.count)||0),0);
+  const lines=['\uFEFF色号,颜色HEX,数量(颗)'];
+  items.forEach(it=>lines.push(`${it.code},${it.hex},${it.count==null?'':it.count}`));
+  lines.push(`总计,${items.length} 种色号,${total}`);
+  const blob=new Blob([lines.join('\n')+'\n'],{type:'text/csv;charset=utf-8'});
+  offerBlob(blob,`${state.fileName||'拼豆'}_色号清单.csv`,'保存色号清单 CSV','CSV 适合用 Excel / WPS 打开；点「保存 / 分享」选择保存位置，或下载存到系统下载目录');
 }
 
 modeTabs.forEach(t=>t.addEventListener('click',()=>{ setMode(t.dataset.mode); }));
