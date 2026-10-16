@@ -87,7 +87,8 @@
 
   async function loadModels(onProgress) {
     if (!window.ort) throw new Error('onnxruntime-web 未加载，请先加载 ort.min.js');
-    ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/';
+    // WASM 运行时优先本地 lib/ort/（离线/内网/手机网络均可用）；由 index.html 按实际加载来源指定兜底 CDN
+    ort.env.wasm.wasmPaths = window.ORT_WASM_BASE || 'lib/ort/';
     if (detSess && recSess) return true;
     if (loading) return loading;
     const opts = { executionProviders: ['wasm'], graphOptimizationLevel: 'all' };

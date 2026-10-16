@@ -34,7 +34,7 @@
 
 图例识别按以下顺序自动选择可用引擎，无需手动干预：
 
-1. **浏览器内 PP-OCRv4**（默认，推荐）—— 模型放 `models/`（约 16MB），用 onnxruntime-web 在浏览器里直接推理，无需任何服务，部署到 GitHub Pages 后立即可用，精度接近本地 RapidOCR
+1. **浏览器内 PP-OCRv4**（默认，推荐）—— 模型放 `models/`（约 16MB），用 onnxruntime-web 在浏览器里直接推理，无需任何服务，部署到 GitHub Pages 后立即可用，精度接近本地 RapidOCR。onnxruntime-web 运行时已随项目打包在 `lib/ort/`（约 11MB），**本地同源加载、不依赖任何 CDN**，手机端也能正常加载；CDN 仅在本地文件缺失时自动兜底。注意需支持 WASM SIMD（iOS 16.4+、新版安卓 Chrome/Edge 均可）
 2. **本地 RapidOCR 服务**（可选增强）—— 仅本机，需先启动服务，识别更快更稳
 3. **tesseract.js**（兜底）—— CDN 加载，精度一般
 

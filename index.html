@@ -1636,15 +1636,17 @@ function loadOrt() {
   if (ortPromise) return ortPromise;
   ortPromise=new Promise((resolve,reject)=>{
     const urls=[
-      'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/ort.min.js',
-      'https://unpkg.com/onnxruntime-web@1.19.2/dist/ort.min.js',
-      'https://registry.npmmirror.com/onnxruntime-web/1.19.2/files/dist/ort.min.js'
+      ['lib/ort/ort.min.js','lib/ort/'],                                         // 本地（优先，离线/内网/手机均可）
+      ['https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/ort.min.js','https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/'],
+      ['https://unpkg.com/onnxruntime-web@1.19.2/dist/ort.min.js','https://unpkg.com/onnxruntime-web@1.19.2/dist/'],
+      ['https://registry.npmmirror.com/onnxruntime-web/1.19.2/files/dist/ort.min.js','https://registry.npmmirror.com/onnxruntime-web/1.19.2/files/dist/']
     ];
     let k=0;
     (function tryNext(){
       if (k>=urls.length) { reject(new Error('onnxruntime-web 加载失败')); return; }
+      window.ORT_WASM_BASE=urls[k][1]; // 告知 ocr-pp.js 用同源的 .wasm 运行时
       const s=document.createElement('script');
-      s.src=urls[k++];
+      s.src=urls[k++][0];
       s.onload=()=>resolve();
       s.onerror=()=>tryNext();
       document.head.appendChild(s);
@@ -1955,6 +1957,7 @@ function generateLegend() {
       const rects=makeOcrRects(strip,W);
       let texts=[];
       let itemsAll=[]; // 各引擎返回的带坐标检测框（用于相对位置配对）
+      let engineFail='';
       // 引擎1：浏览器 PP-OCRv4（整图一次识别，无需服务，GitHub Pages 可用）
       if (state.opts.browserOcr) {
         try {
@@ -1965,6 +1968,7 @@ function generateLegend() {
           console.log('浏览器PP-OCR:',texts);
         } catch (err) {
           console.warn('浏览器 PP-OCR 失败，尝试下一引擎',err);
+          engineFail='浏览器 OCR 初始化失败'+(err&&err.message?'：'+String(err.message).replace(/^Error:\s*/,'').slice(0,80):'');
           texts=[];
           itemsAll=[];
         }
@@ -1982,6 +1986,7 @@ function generateLegend() {
           }
         } catch (err) {
           console.warn('本地 OCR 失败，回退 tesseract',err);
+          if (!engineFail) engineFail='本地 OCR 服务未启动';
           texts=[];
           itemsAll=[];
         }
@@ -2030,10 +2035,10 @@ function generateLegend() {
       const unmatched=ocrItems.filter(it=>it.unmatched).length;
       toast(ocrItems.length
         ? (unmatched? `文字识别完成：${unmatched} 个色号未匹配到所选色板，颜色待核对，文字与数量已保留`:'图例识别完成：文字色号已匹配色板颜色')
-        : '未识别到图例文字，已按色块颜色生成清单，数量可手动填写');
+        : (engineFail? `未识别到文字（${engineFail}），已按色块颜色生成清单，数量可手动填写`:'未识别到图例文字，已按色块颜色生成清单，数量可手动填写'));
     } catch (err) {
       console.error(err);
-      toast('OCR 未加载成功，已按颜色生成清单，数量可手动填写');
+      toast((engineFail?`OCR 加载失败（${engineFail}）。`:'')+'已按颜色生成清单，数量可手动填写');
     } finally {
       generateBtn.disabled=false;
       generateBtn.textContent='识别图例';
