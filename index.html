@@ -118,25 +118,27 @@ body{background:#F3F4F6;color:#1F2937;font-family:-apple-system,BlinkMacSystemFo
       <div class="section-title">识别范围</div>
       <div class="chips" id="scopeChips"></div>
     </div>
-    <div class="section-title">网格尺寸</div>
-    <div class="chips" id="sizeChips"></div>
-    <div class="custom-row">
-      <input class="custom-input" id="customInput" type="number" min="8" max="150" placeholder="自定义 8~150">
-      <button class="custom-btn" id="customApply">应用</button>
+    <div id="outputSettings">
+      <div class="section-title">网格尺寸</div>
+      <div class="chips" id="sizeChips"></div>
+      <div class="custom-row">
+        <input class="custom-input" id="customInput" type="number" min="8" max="150" placeholder="自定义 8~150">
+        <button class="custom-btn" id="customApply">应用</button>
+      </div>
+      <div class="section-title">色号系统</div>
+      <div class="chips" id="systemChips"></div>
+      <div class="section-title">颜色匹配</div>
+      <div class="chips" id="matchChips"></div>
+      <div class="section-title">最多用色（限色收敛）</div>
+      <div class="chips" id="maxColorChips"></div>
+      <div class="section-title">图纸选项</div>
+      <div class="opt-row"><span>近白区域留空（不买豆）</span><label class="switch"><input type="checkbox" id="optBlank" checked><span></span></label></div>
+      <div class="opt-row"><span>格内显示色号</span><label class="switch"><input type="checkbox" id="optNumbers" checked><span></span></label></div>
+      <div class="opt-row"><span>四周行列坐标</span><label class="switch"><input type="checkbox" id="optCoords" checked><span></span></label></div>
+      <div class="opt-row"><span>网格加重线（每 10 格）</span><label class="switch"><input type="checkbox" id="optGrid" checked><span></span></label></div>
+      <div class="opt-row"><span>底部色号用量统计</span><label class="switch"><input type="checkbox" id="optStats" checked><span></span></label></div>
+      <div class="opt-row"><span>标记孤立豆（结构检查）</span><label class="switch"><input type="checkbox" id="optHighlight"><span></span></label></div>
     </div>
-    <div class="section-title">色号系统</div>
-    <div class="chips" id="systemChips"></div>
-    <div class="section-title">颜色匹配</div>
-    <div class="chips" id="matchChips"></div>
-    <div class="section-title">最多用色（限色收敛）</div>
-    <div class="chips" id="maxColorChips"></div>
-    <div class="section-title">图纸选项</div>
-    <div class="opt-row"><span>近白区域留空（不买豆）</span><label class="switch"><input type="checkbox" id="optBlank" checked><span></span></label></div>
-    <div class="opt-row"><span>格内显示色号</span><label class="switch"><input type="checkbox" id="optNumbers" checked><span></span></label></div>
-    <div class="opt-row"><span>四周行列坐标</span><label class="switch"><input type="checkbox" id="optCoords" checked><span></span></label></div>
-    <div class="opt-row"><span>网格加重线（每 10 格）</span><label class="switch"><input type="checkbox" id="optGrid" checked><span></span></label></div>
-    <div class="opt-row"><span>底部色号用量统计</span><label class="switch"><input type="checkbox" id="optStats" checked><span></span></label></div>
-    <div class="opt-row"><span>标记孤立豆（结构检查）</span><label class="switch"><input type="checkbox" id="optHighlight"><span></span></label></div>
   </section>
   <button class="btn btn-generate" id="generateBtn">生成图纸</button>
 
@@ -828,7 +830,7 @@ function drawSheet(ctx,layout,data,opts) {
 const state = {
   gridSize:32, customSize:'', colorSystem:'MARD', match:'lab', maxColors:0, mode:'photo',
   recogScope:'whole',
-  opts:{ blankWhite:true, showNumbers:true, showCoords:true, showGrid:true, showStats:true, highlight:false },
+  opts:{ blankWhite:true, showNumbers:true, showCoords:true, showGrid:true, showStats:true, highlight:false, browserOcr:true, localOcr:true, watermark:true },
   viewMode:'pattern', sourceImage:null, fileName:'',
   result:null, legend:null, audit:null, auditText:'', stats:[], layout:null, drawOpts:null,
   view:null, fitScale:1, ctx:null, cssW:0, cssH:0, rafId:0,
@@ -1038,6 +1040,7 @@ function setMode(mode) {
     generateBtn.textContent='生成图纸';
   }
   scopeBlock.hidden=!isSheet;
+  outputSettings.hidden=isSheet; // 图纸识别只保留「识别范围」，输出样式设置归图片生成模式
   state.result=null;
   state.legend=null;
   legendBlock.hidden=true;
@@ -1238,24 +1241,360 @@ function exportCsv() {
 }
 
 // ========== 底部色标图例识别（色号 + OCR 数量） ==========
-let legendCanvas=null, ocrWorker=null;
+let legendCanvas=null, ocrWorker=null, legendGridInfo=null;
 
 function findHexByCode(code) {
   const c=String(code||'').toUpperCase().trim();
   if (!c) return null;
-  return ALL_HEX.find(h=>getColorKeyByHex(h,state.colorSystem).toUpperCase()===c)||null;
+  let h=ALL_HEX.find(hx=>getColorKeyByHex(hx,state.colorSystem).toUpperCase()===c)||null;
+  if (!h) { // OCR 常见混淆：O/0、I/1
+    const v=c.replace(/O/g,'0').replace(/I/g,'1');
+    h=ALL_HEX.find(hx=>getColorKeyByHex(hx,state.colorSystem).toUpperCase()===v)||null;
+  }
+  return h;
+}
+function normalizeCode(c){ return String(c||'').toUpperCase().replace(/O/g,'0').replace(/I/g,'1'); }
+function levenshtein(a,b){
+  if (a===b) return 0;
+  const m=a.length, n=b.length;
+  if (!m) return n;
+  if (!n) return m;
+  let prev=new Array(n+1), cur=new Array(n+1);
+  for (let j=0;j<=n;j++) prev[j]=j;
+  for (let i=1;i<=m;i++) {
+    cur[0]=i;
+    for (let j=1;j<=n;j++) {
+      const cost=a[i-1]===b[j-1]?0:1;
+      cur[j]=Math.min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost);
+    }
+    [prev,cur]=[cur,prev];
+  }
+  return prev[n];
+}
+// 色号容错匹配：先精确（含 O/0、I/1 归一），再编辑距离≤1（OCR 常把 8↔B、6↔G、5↔S、2↔Z、4↔A 读混），要求首字母一致防误配
+function matchCodeFuzzy(code) {
+  const c=normalizeCode(code);
+  if (!c) return null;
+  let h=ALL_HEX.find(hx=>normalizeCode(getColorKeyByHex(hx,state.colorSystem))===c);
+  if (h) return h;
+  if (c.length<2) return null;
+  let best=null, bestD=2;
+  for (const hx of ALL_HEX) {
+    const k=normalizeCode(getColorKeyByHex(hx,state.colorSystem));
+    if (Math.abs(k.length-c.length)>1) continue;
+    if (k[0]!==c[0]) continue; // 首字母必须一致
+    const d=levenshtein(k,c);
+    if (d<bestD) { bestD=d; best=hx; if (d===0) break; }
+  }
+  return bestD<=1 ? best : null;
 }
 
-function hasDark(d,W,rect) {
-  const x2=Math.min(rect.left+rect.width-1,W-1), y2=rect.top+rect.height-1;
-  let n=0;
-  for (let y=Math.max(0,rect.top); y<=y2 && y>=0; y++) {
-    for (let x=Math.max(0,rect.left); x<=x2 && x>=0; x++) {
+// ---------- 网格图纸区域检测：找周期性横/竖线条，确定图纸矩形范围 ----------
+function linesFromProj(proj, th) {
+  const lines=[], n=proj.length;
+  let i=0;
+  while (i<n) {
+    if (proj[i]>=th) {
+      let j=i;
+      while (j+1<n && proj[j+1]>=th) j++;
+      const pos=Math.round((i+j)/2);
+      if (lines.length && pos-lines[lines.length-1]<6) {
+        lines[lines.length-1]=Math.round((lines[lines.length-1]+pos)/2);
+      } else lines.push(pos);
+      i=j+1;
+    } else i++;
+  }
+  return lines;
+}
+function gridRangeFromLines(lines) {
+  if (lines.length<5) return null;
+  const ivs=[];
+  for (let i=1;i<lines.length;i++) ivs.push(lines[i]-lines[i-1]);
+  const bins=new Map();
+  ivs.forEach(v=>{ const b=Math.round(v/3)*3; bins.set(b,(bins.get(b)||0)+1); });
+  let mode=0, mc=0;
+  bins.forEach((c,b)=>{ if (c>mc){ mc=c; mode=b; } });
+  if (mode<7 || mode>200) return null;
+  let best=null;
+  for (let i=0;i<lines.length;i++) {
+    const chain=[lines[i]];
+    let last=lines[i];
+    for (let j=i+1;j<lines.length;j++) {
+      const gap=lines[j]-last;
+      if (gap>=mode*0.75 && gap<=mode*1.35) { chain.push(lines[j]); last=lines[j]; }
+      else if (gap>mode*1.35) break;
+    }
+    if (chain.length>=5 && (!best || chain.length>best.length)) best=chain;
+  }
+  if (!best) return null;
+  return [best[0]-Math.round(mode/2), best[best.length-1]+Math.round(mode/2)];
+}
+function detectGridArea(d,W,H) {
+  const P=2;
+  const rowN=Math.ceil(W/P), rows=new Float64Array(H);
+  for (let y=0;y<H;y++) {
+    let c=0;
+    for (let x=0;x<W;x+=P) {
       const i=(y*W+x)*4;
-      if (Math.max(d[i],d[i+1],d[i+2])<=105 && ++n>=12) return true;
+      const lum=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
+      if (lum<235) c++;
+    }
+    rows[y]=c/rowN;
+  }
+  const colN=Math.ceil(H/P), cols=new Float64Array(W);
+  for (let x=0;x<W;x++) {
+    let c=0;
+    for (let y=0;y<H;y+=P) {
+      const i=(y*W+x)*4;
+      const lum=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
+      if (lum<235) c++;
+    }
+    cols[x]=c/colN;
+  }
+  const hLines=linesFromProj(rows,0.45);
+  const vLines=linesFromProj(cols,0.45);
+  if (hLines.length<5 || vLines.length<5) return null;
+  const hor=gridRangeFromLines(hLines), ver=gridRangeFromLines(vLines);
+  if (!hor || !ver) return null;
+  return { x0:ver[0], x1:ver[1], y0:hor[0], y1:hor[1] };
+}
+
+// ---------- 图例色块提取 ----------
+function isSwatchPix(r,g,b) {
+  const mn=Math.min(r,g,b), mx=Math.max(r,g,b);
+  if (mx-mn<20) return false;
+  if (mx>=248 && mn>=236) return false;
+  const lum=0.299*r+0.587*g+0.114*b;
+  return lum>=28;
+}
+function extractBlocks(d,W,H,strip) {
+  const y0=Math.max(0,strip.y0), y1=Math.min(H-1,strip.y1);
+  const runs=[];
+  for (let y=y0;y<=y1;y++) {
+    let x=0;
+    while (x<W) {
+      const i0=(y*W+x)*4;
+      if (isSwatchPix(d[i0],d[i0+1],d[i0+2])) {
+        const st=x;
+        let sr=0, sg=0, sb=0, c=0;
+        while (x<W && isSwatchPix(d[(y*W+x)*4],d[(y*W+x)*4+1],d[(y*W+x)*4+2])) {
+          sr+=d[(y*W+x)*4]; sg+=d[(y*W+x)*4+1]; sb+=d[(y*W+x)*4+2]; c++; x++;
+        }
+        if (x-st >= Math.max(5,Math.round(W*0.006))) runs.push({y,x0:st,x1:x-1,r:sr/c,g:sg/c,b:sb/c});
+      } else x++;
     }
   }
-  return false;
+  const blocks=[];
+  for (const run of runs) {
+    let t=-1;
+    for (let bi=0;bi<blocks.length;bi++) {
+      const b=blocks[bi];
+      if (b.y1>=run.y-3 && run.x0<=b.x1+3 && run.x1>=b.x0-3 &&
+          Math.abs(b.r-run.r)+Math.abs(b.g-run.g)+Math.abs(b.b-run.b)<=110) { t=bi; break; }
+    }
+    if (t<0) blocks.push({x0:run.x0,x1:run.x1,y0:run.y,y1:run.y,r:run.r,g:run.g,b:run.b,n:1});
+    else {
+      const b=blocks[t], n=b.n+1;
+      b.x0=Math.min(b.x0,run.x0); b.x1=Math.max(b.x1,run.x1);
+      b.y0=Math.min(b.y0,run.y); b.y1=Math.max(b.y1,run.y);
+      b.r=(b.r*b.n+run.r)/n; b.g=(b.g*b.n+run.g)/n; b.b=(b.b*b.n+run.b)/n; b.n=n;
+    }
+  }
+  return blocks.filter(b=>(b.y1-b.y0)>=6 && (b.x1-b.x0)>=Math.max(5,Math.round(W*0.006)));
+}
+function darkDensity(d,W,l,t,rw,rh) {
+  const st=Math.max(1,Math.round(rw/16));
+  let dark=0, cnt=0;
+  for (let y=t;y<t+rh;y+=2) {
+    for (let x=l;x<l+rw;x+=st) {
+      const i=(y*W+x)*4;
+      if (Math.max(d[i],d[i+1],d[i+2])<=130) dark++;
+      cnt++;
+    }
+  }
+  return cnt? dark/cnt : 0;
+}
+function textRectForBlock(d,W,H,b) {
+  const bw=b.x1-b.x0+1, bh=b.y1-b.y0+1;
+  const pad=Math.max(2,Math.round(bw*0.25));
+  const hT=Math.round(Math.max(14,bh*0.9));
+  const wR=Math.round(Math.max(14,bw*0.9));
+  const cands=[
+    {rect:{left:Math.max(0,b.x0-pad), top:b.y1+1, width:Math.min(W-1,b.x1+pad)-Math.max(0,b.x0-pad)+1, height:hT}},
+    {rect:{left:Math.max(0,b.x0-pad), top:Math.max(0,b.y0-hT), width:Math.min(W-1,b.x1+pad)-Math.max(0,b.x0-pad)+1, height:hT}},
+    {rect:{left:Math.min(W-1,b.x1+1), top:Math.max(0,b.y0-2), width:wR, height:Math.min(H-1,b.y1+2)-Math.max(0,b.y0-2)+1}},
+    {rect:{left:Math.max(0,b.x0-wR), top:Math.max(0,b.y0-2), width:Math.max(1,b.x0-Math.max(0,b.x0-wR)), height:Math.min(H-1,b.y1+2)-Math.max(0,b.y0-2)+1}}
+  ];
+  let best=null, bestD=0;
+  for (const c of cands) {
+    const r=c.rect;
+    const l=Math.max(0,r.left), t=Math.max(0,r.top);
+    const rw=Math.min(W,l+r.width)-l, rh=Math.min(H,t+r.height)-t;
+    if (rw<4 || rh<4) continue;
+    const dens=darkDensity(d,W,l,t,rw,rh);
+    if (dens>bestD) { bestD=dens; best={left:l,top:t,width:rw,height:rh}; }
+  }
+  return bestD>0.02 ? best : null;
+}
+
+// 定位图例带区域：网格检测仅作辅助（命中则优先检查图纸上下两侧）；
+// 未检测到网格或网格旁无图例时，自动回退整图扫描色块带（底部→顶部→中部），不再拦截识别流程
+function legendAreaRect(d,W,H,grid) {
+  let best=null;
+  const consider=(s)=>{
+    if (!s || s.y1-s.y0<8) return;
+    const blocks=extractBlocks(d,W,H,s);
+    if (!blocks || blocks.length<3) return;
+    if (!best || blocks.length>best.score) best={y0:s.y0,y1:s.y1,blocks,score:blocks.length};
+  };
+  legendGridInfo=null;
+  if (grid) {
+    const gh=grid.y1-grid.y0, gw=grid.x1-grid.x0;
+    const maxH=Math.max(34,Math.round(Math.max(gh,gw)*0.35));
+    legendGridInfo={gw:Math.round(gw),gh:Math.round(gh)};
+    if (grid.y1+2<H) consider({y0:grid.y1+1,y1:Math.min(H-1,grid.y1+maxH)});   // 图例在图纸下方
+    if (grid.y0-maxH>=2) consider({y0:Math.max(0,grid.y0-maxH),y1:grid.y0-1}); // 图例在图纸上方
+  }
+  if (!best) consider({y0:Math.round(H*0.72),y1:H-1});          // 兜底①：底部 28%
+  if (!best) consider({y0:0,y1:Math.round(H*0.18)});            // 兜底②：顶部 18%
+  if (!best) consider({y0:Math.round(H*0.3),y1:Math.round(H*0.7)}); // 兜底③：中部（纯图例图）
+  return best||null;
+}
+
+// 仅定位图例带（返回画布与色块），供"整带 OCR 文字→色号查表"主流程使用
+function extractLegendStrip() {
+  const img=state.sourceImage;
+  const iw=img.naturalWidth, ih=img.naturalHeight;
+  const MAX=1600;
+  const sc=Math.min(1,MAX/Math.max(iw,ih));
+  const W=Math.max(8,Math.round(iw*sc)), H=Math.max(8,Math.round(ih*sc));
+  const off=document.createElement('canvas');
+  off.width=W; off.height=H;
+  const octx=off.getContext('2d');
+  octx.drawImage(img,0,0,W,H);
+  const d=octx.getImageData(0,0,W,H).data;
+  legendCanvas=off;
+  // 不再依赖网格检测：直接按色块带扫描定位图例（网格检测仅作辅助，见 legendAreaRect）
+  const strip=legendAreaRect(d,W,H,null);
+  if (!strip) return null;
+  return { d,W,H,canvas:off, grid:null, strip };
+}
+
+// 把图例带横向切成若干段，每段作为一次 OCR 的矩形
+function makeOcrRects(strip,W) {
+  const SEG=Math.max(300,Math.round(W/2));
+  const rects=[];
+  for (let x=0;x<W;x+=SEG) {
+    const l=Math.max(0,x), r=Math.min(W-1,x+SEG);
+    if (r-l>=16) rects.push({left:l, top:Math.max(0,strip.y0), width:r-l, height:strip.y1-Math.max(0,strip.y0)+1});
+  }
+  return rects;
+}
+
+// OCR 数字常把 0 读成 O、1 读成 I/L，先归一化再取数
+const NUM_RE=/[0-9OIl]{1,6}/g;
+function toNum(t) {
+  const s=String(t).replace(/[Oo]/g,'0').replace(/[Il]/g,'1');
+  const n=parseInt(s,10);
+  return Number.isFinite(n)?n:null;
+}
+
+// 从整段 OCR 文本中解析出"色号×数量"列表。图例排版多样：同行混排/色号行+数量行，逐行处理
+function parseLegendPairs(raw) {
+  const lines=(raw||'').split(/\n+/).map(l=>l.replace(/\s+/g,' ').trim()).filter(Boolean);
+  const pairs=[], codeRow=[], numRow=[];
+  lines.forEach(line=>{
+    const hasCode=/[A-Za-z]{1,3}\d{1,4}/.test(line);
+    const nums=[...line.matchAll(NUM_RE)].map(m=>toNum(m[0])).filter(v=>v!=null);
+    if (hasCode && !nums.length) { // 纯色号行
+      [...line.matchAll(/[A-Za-z]{1,3}\d{1,4}/g)].forEach(m=>codeRow.push(normalizeCode(m[0])));
+      return;
+    }
+    if (!hasCode && nums.length) { // 纯数量行
+      numRow.push(...nums);
+      return;
+    }
+    if (!hasCode) return;
+    const toks=[...line.matchAll(/[A-Za-z]{1,3}\d{1,4}|[0-9OIl]{1,6}/g)];
+    let last=null;
+    toks.forEach(t=>{
+      if (/^[A-Za-z]/.test(t[0])) last={code:normalizeCode(t[0]), end:t.index+t[0].length};
+      else {
+        const n=toNum(t[0]);
+        if (n!=null && last) {
+          const cn=parseInt(last.code.replace(/\D/g,''),10);
+          if (!(n===cn && t.index<=last.end+1)) pairs.push({code:last.code,count:n});
+          last=null;
+        }
+      }
+    });
+    if (last) codeRow.push(last.code); // 行尾未配对的色号补入色号行
+  });
+  // 色号行与数量行按位置对齐
+  if (codeRow.length && numRow.length) {
+    const m=Math.min(codeRow.length,numRow.length);
+    for (let i=0;i<m;i++) pairs.push({code:codeRow[i],count:numRow[i]});
+  }
+  return pairs;
+}
+
+// 坐标版配对：不依赖文本流粘连，按检测框相对位置（y 聚类成行、x 列对齐）确定"哪个是色号、哪个是数量"再配对。
+// items: [{text, box:[x0,y0,x1,y1]}]（浏览器 PP-OCR / 本地 RapidOCR 返回），优先于 parseLegendPairs 使用
+function buildPairsFromItems(items) {
+  const arr=(items||[]).filter(i=>i&&i.text&&i.box&&i.box.length===4);
+  if (arr.length<2) return [];
+  const clean=s=>String(s||'').toUpperCase().replace(/[^0-9A-Z]/g,'');
+  const isCode=t=>/^[A-Z]{1,4}\d{1,4}$/.test(t);
+  const isNum=t=>/^\d{1,6}$/.test(t);
+  // 1) 按 y 中心聚类成行（容差 14px）
+  const rows=[];
+  arr.forEach(o=>{
+    const yc=(o.box[1]+o.box[3])/2;
+    let row=null;
+    for (const g of rows) if (Math.abs(g.yc-yc)<=14) { row=g; break; }
+    if (!row) { row={yc, codes:[], nums:[]}; rows.push(row); }
+    else { const n=row.codes.length+row.nums.length; row.yc=(row.yc*n+yc)/(n+1); }
+    const t=clean(o.text), xc=(o.box[0]+o.box[2])/2;
+    if (isCode(t)) row.codes.push({code:normalizeCode(o.text), xc});
+    else if (isNum(t)) row.nums.push({n:toNum(o.text), xc});
+  });
+  const pairs=[];
+  // 2) 布局检测：存在"纯色号行"且存在"纯数量行" → 两行式，跨行按 x 列对齐。
+  //    否则视为单行混排（C12 46 C16 28 … 同行交替），每行行内按 x 顺序配对并合并所有行。
+  const pureCodes=rows.filter(r=>r.codes.length&&!r.nums.length).sort((a,b)=>a.yc-b.yc);
+  const pureNums=rows.filter(r=>r.nums.length&&!r.codes.length).sort((a,b)=>a.yc-b.yc);
+  if (pureCodes.length && pureNums.length) {
+    pureCodes.forEach(cr=>{
+      // 找 y 距离最近的未用纯数量行
+      let bestN=null, bd=1e9;
+      pureNums.forEach(nr=>{ const d=Math.abs(nr.yc-cr.yc); if (d<bd){ bd=d; bestN=nr; } });
+      if (!bestN) { cr.codes.forEach(c=>pairs.push({code:c.code,count:null})); return; }
+      const used=new Set();
+      cr.codes.forEach(c=>{
+        let bi=-1,bd2=1e9;
+        bestN.nums.forEach((num,idx)=>{ if(!used.has(idx)){ const dd=Math.abs(num.xc-c.xc); if(dd<bd2){bd2=dd;bi=idx;} } });
+        if (bi>=0 && bd2<=100) { pairs.push({code:c.code,count:bestN.nums[bi].n}); used.add(bi); }
+        else pairs.push({code:c.code,count:null});
+      });
+      const i=pureNums.indexOf(bestN); if (i>=0) pureNums.splice(i,1);
+    });
+    return pairs;
+  }
+  // 3) 单行混排：同行内 色号/数量 按 x 顺序交替配对
+  for (const r of rows) {
+    if (!r.codes.length) continue;
+    const seq=[];
+    r.codes.forEach(c=>{ if(!c.code) return; seq.push({t:0, xc:c.xc, code:c.code}); });
+    r.nums.forEach(n=>{ if(n.n==null) return; seq.push({t:1, xc:n.xc, n:n.n}); });
+    seq.sort((a,b)=>a.xc-b.xc);
+    let last=null;
+    for (const s of seq) {
+      if (s.t===0) { if (last) pairs.push({code:last,count:null}); last=s.code; }
+      else if (last){ pairs.push({code:last,count:s.n}); last=null; }
+    }
+    if (last) pairs.push({code:last,count:null});
+  }
+  return pairs;
 }
 
 function extractLegendSwatches() {
@@ -1269,82 +1608,111 @@ function extractLegendSwatches() {
   const octx=off.getContext('2d');
   octx.drawImage(img,0,0,W,H);
   const d=octx.getImageData(0,0,W,H).data;
-  const y0=Math.max(0,Math.round(H*0.75)); // 取图片底部 25% 作为图例候选区
-  const cntCol=new Int32Array(W), sR=new Int32Array(W), sG=new Int32Array(W), sB=new Int32Array(W);
-  const yTop=new Int32Array(W).fill(-1), yBot=new Int32Array(W).fill(-1);
-  for (let y=y0;y<H;y++) {
-    for (let x=0;x<W;x++) {
-      const i=(y*W+x)*4;
-      const r=d[i], g=d[i+1], b=d[i+2];
-      const mn=Math.min(r,g,b), mx=Math.max(r,g,b);
-      if (mx-mn<22) continue;          // 灰阶：跳过背景/边框
-      if (mx>=248 && mn>=236) continue; // 近白
-      const lum=0.299*r+0.587*g+0.114*b;
-      if (lum<28) continue;            // 近黑：文字
-      cntCol[x]++;
-      sR[x]+=r; sG[x]+=g; sB[x]+=b;
-      if (yTop[x]<0) yTop[x]=y;
-      yBot[x]=y;
-    }
-  }
-  let maxC=0;
-  for (let x=0;x<W;x++) if (cntCol[x]>maxC) maxC=cntCol[x];
-  if (maxC < Math.max(6,(H-y0)*0.1)) return null;
-  const thresh=Math.max(6,Math.round(maxC*0.35));
-  const runs=[];
-  let x0=-1;
-  for (let x=0;x<=W;x++) {
-    const ok = x<W && cntCol[x]>=thresh;
-    if (ok && x0<0) x0=x;
-    else if (!ok && x0>=0) {
-      if (x-x0 >= Math.max(5,Math.round(W*0.006))) runs.push({x0,x1:x-1});
-      x0=-1;
-    }
-  }
-  // 大色块内部再按颜色切分（两个色块紧贴时）
-  const seg=[];
-  for (const run of runs) {
-    const cols=[];
-    for (let x=run.x0;x<=run.x1;x++) cols.push({x,r:Math.round(sR[x]/cntCol[x]),g:Math.round(sG[x]/cntCol[x]),b:Math.round(sB[x]/cntCol[x])});
-    let st=0;
-    for (let k=1;k<=cols.length;k++) {
-      if (k===cols.length || Math.abs(cols[k].r-cols[k-1].r)+Math.abs(cols[k].g-cols[k-1].g)+Math.abs(cols[k].b-cols[k-1].b)>90) {
-        const part=cols.slice(st,k);
-        if (part.length>=Math.max(5,Math.round(W*0.006))) {
-          let R=0,G=0,B=0;
-          part.forEach(c=>{R+=c.r;G+=c.g;B+=c.b;});
-          const n=part.length;
-          seg.push({x0:part[0].x,x1:part[n-1].x,r:Math.round(R/n),g:Math.round(G/n),b:Math.round(B/n)});
-        }
-        st=k;
-      }
-    }
-  }
-  if (!seg.length) return null;
-  const swatches=[];
-  for (let i=0;i<seg.length;i++) {
-    const s=seg[i];
-    if (s.x1-s.x0<4) continue;
-    let top=H, bottom=y0;
-    for (let x=s.x0;x<=s.x1;x++) {
-      if (yTop[x]>=0) { if (yTop[x]<top) top=yTop[x]; if (yBot[x]>bottom) bottom=yBot[x]; }
-    }
-    if (bottom<=top) continue;
-    // 文字区域：优先色块下方，其次右侧缝隙
-    let rect=null;
-    if (bottom+1 < H-2) {
-      const r0={left:Math.max(0,s.x0-2), top:bottom+1, width:Math.min(W,s.x1+2)-Math.max(0,s.x0-2), height:H-(bottom+1)};
-      if (r0.width>0 && r0.height>=6 && hasDark(d,W,r0)) rect=r0;
-    }
-    if (!rect && i<seg.length-1 && seg[i+1].x0-s.x1-1>=4) {
-      const rr={left:s.x1+1, top:Math.max(y0,top-3), width:seg[i+1].x0-s.x1-1, height:Math.min(H,bottom+3)-Math.max(y0,top-3)};
-      if (rr.width>0 && rr.height>=6 && hasDark(d,W,rr)) rect=rr;
-    }
-    swatches.push({x0:s.x0,x1:s.x1,top,bottom,hex:matchRgb(s.r,s.g,s.b,state.match),rect});
-  }
-  if (swatches.length<2) return null;
   legendCanvas=off;
-  return swatches;
+
+  const area=legendAreaRect(d,W,H,null); // 不再依赖网格检测
+  if (!area) return null;
+  const best=area;
+
+  // 匹配色号 + 定位每个色块旁的 OCR 文字区域
+  const swatches=best.blocks.map(b=>{
+    const bw=b.x1-b.x0+1, bh=b.y1-b.y0+1;
+    const px=Math.round(bw*1.3), py=Math.round(bh*1.4);
+    return {
+      x0:b.x0,x1:b.x1,y0:b.y0,y1:b.y1,
+      hex:matchRgb(Math.round(b.r),Math.round(b.g),Math.round(b.b),state.match),
+      rect:textRectForBlock(d,W,H,b),
+      crop:{left:Math.max(0,b.x0-px), top:Math.max(0,b.y0-py), width:Math.min(W-1,b.x1+px)-Math.max(0,b.x0-px)+1, height:Math.min(H-1,b.y1+py)-Math.max(0,b.y0-py)+1}
+    };
+  }).sort((a,b)=>a.x0-b.x0 || a.y0-b.y0);
+  return swatches.length>=3 ? swatches : null;
+}
+
+// ===== 浏览器 OCR 引擎（PP-OCRv4，onnxruntime-web）=====
+// 动态加载 onnxruntime-web（CDN，多源 fallback）；ocr-pp.js 已静态引入
+let ortPromise=null;
+function loadOrt() {
+  if (window.ort) return Promise.resolve();
+  if (ortPromise) return ortPromise;
+  ortPromise=new Promise((resolve,reject)=>{
+    const urls=[
+      'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.2/dist/ort.min.js',
+      'https://unpkg.com/onnxruntime-web@1.19.2/dist/ort.min.js',
+      'https://registry.npmmirror.com/onnxruntime-web/1.19.2/files/dist/ort.min.js'
+    ];
+    let k=0;
+    (function tryNext(){
+      if (k>=urls.length) { reject(new Error('onnxruntime-web 加载失败')); return; }
+      const s=document.createElement('script');
+      s.src=urls[k++];
+      s.onload=()=>resolve();
+      s.onerror=()=>tryNext();
+      document.head.appendChild(s);
+    })();
+  });
+  return ortPromise;
+}
+// 浏览器内 PP-OCR 识别整张图例带，返回 {texts, items}（items 带检测框坐标，供相对位置配对）；失败向上抛由 generateLegend 回退
+async function browserOcr(canvas,onProgress) {
+  await loadOrt();
+  if (!window.PPOCR) throw new Error('ocr-pp.js 未加载');
+  await PPOCR.load((stage,i,n)=>{
+    if (stage==='det') onProgress&&onProgress(`加载模型 ${i+1}/${n}…`);
+    else if (stage==='cls') onProgress&&onProgress(`加载模型 ${i+1}/${n}…`);
+    else if (stage==='rec') onProgress&&onProgress(`加载模型 ${i+1}/${n}…`);
+    else onProgress&&onProgress('模型就绪，识别中…');
+  });
+  onProgress&&onProgress('识别中…');
+  const lines=await PPOCR.ocr(canvas);
+  const items=lines.map(l=>{
+    const xs=l.box.map(p=>p[0]), ys=l.box.map(p=>p[1]);
+    return { text:l.text, box:[Math.min(...xs),Math.min(...ys),Math.max(...xs),Math.max(...ys)], score:l.score };
+  }).filter(i=>i.text.trim());
+  return { texts:items.map(i=>i.text), items };
+}
+
+// ===== 本地 OCR 引擎（RapidOCR 代理服务）=====
+const LOCAL_OCR_BASE='http://127.0.0.1:8765';
+// 探测本地服务是否可用（限时 1.5s，不阻塞主流程）
+async function localOcrHealth() {
+  try {
+    const ctl=new AbortController();
+    const timer=setTimeout(()=>ctl.abort(),1500);
+    const r=await fetch(LOCAL_OCR_BASE+'/health',{signal:ctl.signal});
+    clearTimeout(timer);
+    return r.ok;
+  } catch (err) { return false; }
+}
+// 对单个区域做预处理放大后 POST 给本地服务识别，返回 {text, items}（items 坐标已换算回图例带全局坐标）
+async function localOcrRegion(canvas,rect) {
+  const scale=3; // RapidOCR 对新图放大更敏感，用 3x
+  const patch=makeOcrPatch(canvas,rect,scale);
+  const blob=await new Promise(res=>patch.toBlob(res,'image/png'));
+  if (!blob) return {text:'',items:[]};
+  const b64=await new Promise(res=>{
+    const fr=new FileReader();
+    fr.onload=()=>res(String(fr.result).split(',')[1]||'');
+    fr.onerror=()=>res('');
+    fr.readAsDataURL(blob);
+  });
+  if (!b64) return {text:'',items:[]};
+  const r=await fetch(LOCAL_OCR_BASE+'/ocr',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({image:'data:image/png;base64,'+b64, watermark: state.opts.watermark ? 1 : 0})
+  });
+  if (!r.ok) return {text:'',items:[]};
+  const j=await r.json();
+  const t=(j&&j.text||'').replace(/[ \t]+/g,' ').replace(/[^\x20-\x7E０-９]/g,' ').trim();
+  const items=(j&&j.items||[]).map(it=>{
+    const b=it.box;
+    return { text:String(it.text||''), box:[rect.left+b[0]/scale, rect.top+b[1]/scale, rect.left+b[2]/scale, rect.top+b[3]/scale], score:it.score||0 };
+  }).filter(i=>i.text.trim());
+  return {text:t, items};
+}
+// 本地单次识别；网络/服务异常向上抛，由 generateLegend 整体回退 tesseract
+async function ocrRegionLocal(canvas,rect) {
+  return await localOcrRegion(canvas,rect);
 }
 
 function loadTesseract() {
@@ -1360,8 +1728,11 @@ function loadTesseract() {
       if (k>=urls.length) { reject(new Error('ocr-load-fail')); return; }
       const s=document.createElement('script');
       s.src=urls[k++];
-      s.onload=()=>resolve();
-      s.onerror=()=>next();
+      let done=false;
+      const finish=(err)=>{ if (done) return; done=true; clearTimeout(timer); s.onload=s.onerror=null; err?reject(err):resolve(); };
+      const timer=setTimeout(()=>{ if (!done) { done=true; s.remove(); next(); } },12000); // 单个 CDN 12s 超时，防止挂起
+      s.onload=()=>finish();
+      s.onerror=()=>{ if (!done) { done=true; clearTimeout(timer); next(); } };
       document.head.appendChild(s);
     };
     next();
@@ -1376,14 +1747,96 @@ async function getOcrWorker() {
       generateBtn.textContent='识别文字 '+p+'%…';
     }
   }});
-  await ocrWorker.setParameters({ tessedit_char_whitelist:'0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ', tessedit_pageseg_mode:'7' });
+  await ocrWorker.setParameters({ tessedit_char_whitelist:'0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ', tessedit_pageseg_mode:'11' }); // 稀疏文本：适合色块+文字混合的图例带
   return ocrWorker;
 }
-async function ocrCrop(worker,canvas,rect) {
+// OCR 预处理：裁 rect → 放大 2x → 灰度 + 线性对比度拉伸。tesseract 对小图/低对比识别差，放大拉伸后准确率大幅提升
+// 开启水印过滤时再做"黑+白保留"二值化（浅色水印抹白，白字通过局部均值判定转黑），与 PP-OCR 引擎策略一致
+function makeOcrPatch(canvas,rect,scale) {
+  scale=scale||2;
+  const sw=Math.max(8,Math.round(rect.width*scale));
+  const sh=Math.max(8,Math.round(rect.height*scale));
+  const c=document.createElement('canvas');
+  c.width=sw; c.height=sh;
+  const ctx=c.getContext('2d');
+  ctx.imageSmoothingEnabled=true;
+  ctx.imageSmoothingQuality='high';
+  ctx.drawImage(canvas,rect.left,rect.top,rect.width,rect.height,0,0,sw,sh);
+  const img=ctx.getImageData(0,0,sw,sh);
+  const px=img.data;
+  let min=255, max=0;
+  for (let i=0;i<px.length;i+=4) {
+    const g=px[i]*0.299+px[i+1]*0.587+px[i+2]*0.114;
+    px[i]=px[i+1]=px[i+2]=g;
+    if (g<min) min=g;
+    if (g>max) max=g;
+  }
+  const lo=min, hi=Math.max(lo+1,max);
+  const inv=255/(hi-lo);
+  for (let i=0;i<px.length;i+=4) {
+    let v=(px[i]-lo)*inv;
+    px[i]=px[i+1]=px[i+2]=v<0?0:v>255?255:v;
+  }
+  if (state.opts.watermark) applyBwFilter(px,sw,sh);
+  ctx.putImageData(img,0,0);
+  return c;
+}
+
+// 就地"黑+白保留"二值化：黑字→0，白字(周围暗像素占比高，即深色/彩色块上)→0，浅色水印/背景→255
+// 自适应触发：浅色干扰(120~205)须成片铺开（>=25%，或 >=8% 且白底占<45%）才判定为水印；
+// 散点底纹/抗锯齿浅灰不触发，原图直读准确率更高
+function applyBwFilter(px,w,h) {
+  const n=w*h;
+  const g=new Float32Array(n);
+  let lightCnt=0, whiteCnt=0;
+  for (let i=0;i<n;i++) { const v=px[i*4]; g[i]=v; if (v>=120&&v<=205) lightCnt++; else if (v>=220) whiteCnt++; }
+  const lp=lightCnt/n, wp=whiteCnt/n;
+  if (!(lp>=0.25||(lp>=0.08&&wp<0.45))) return;
+  const R=Math.max(2,Math.round(Math.min(w,h)/24));
+  const D=140;
+  const tmp=new Float32Array(n);
+  for (let y=0;y<h;y++) {
+    const base=y*w;
+    let s=0, cnt=0;
+    for (let x=-R;x<=R;x++) if (x>=0&&x<w) { cnt++; if (g[base+x]<=D) s++; }
+    for (let x=0;x<w;x++) {
+      tmp[base+x]=s;
+      const out=x-R,inX=x+R+1;
+      if (out>=0) { cnt--; if (g[base+out]<=D) s--; }
+      if (inX<w) { cnt++; if (g[base+inX]<=D) s++; }
+    }
+  }
+  for (let x=0;x<w;x++) {
+    let s=0, cnt=0;
+    for (let yy=-R;yy<=R;yy++) if (yy>=0&&yy<h) { cnt++; s+=tmp[yy*w+x]; }
+    for (let y=0;y<h;y++) {
+      const ratio=cnt?s/cnt:0, v=g[y*w+x];
+      const o=(v<=90||(v>=200&&ratio>=0.55))?0:255;
+      const p=(y*w+x)*4;
+      px[p]=px[p+1]=px[p+2]=o;
+      const outY=y-R,inY=y+R+1;
+      if (outY>=0) { cnt--; s-=tmp[outY*w+x]; }
+      if (inY<h) { cnt++; s+=tmp[inY*w+x]; }
+    }
+  }
+}
+
+async function ocrRegion(worker,canvas,rect,mode) {
+  if (!rect || rect.width<4 || rect.height<4) return {text:''};
   try {
-    const {data}=await worker.recognize(canvas,{rectangle:rect});
-    return data.text||'';
-  } catch (err) { return ''; }
+    const patch=makeOcrPatch(canvas,rect,2);
+    await worker.setParameters({ tessedit_pageseg_mode:mode });
+    const {data}=await worker.recognize(patch);
+    const text=(data.text||'').replace(/[ \t]+/g,' ').replace(/[^\x20-\x7E０-９]/g,' ').trim();
+    return {text};
+  } catch (err) { return {text:''}; }
+}
+
+// 同一区域用两种分页模式识别后合并：PSM6=均匀文本块，PSM11=稀疏文本，互相补漏
+async function ocrRegionBoth(worker,canvas,rect) {
+  const a=await ocrRegion(worker,canvas,rect,'6');
+  const b=await ocrRegion(worker,canvas,rect,'11');
+  return { text:[a.text,b.text].filter(t=>t&&t.length>=2).join('\n') };
 }
 
 function parseLegendText(raw) {
@@ -1395,13 +1848,15 @@ function parseLegendText(raw) {
     const unit=text.match(/(\d{1,5})\s*[个颗]/);
     if (unit) count=parseInt(unit[1],10);
     else {
-      const mc=text.match(/[A-Za-z]{1,3}\d{1,4}|\d{2,4}/);
+      const mc=text.match(/[A-Za-z]{1,3}\d{1,4}/); // 色号（字母开头），如 D02
       const codeN = mc ? parseInt(mc[0].replace(/\D/g,'')||'0',10) : 0;
       const nums=[...text.matchAll(/\d{1,5}/g)].map(m=>parseInt(m[0],10));
-      const cands=nums.filter(n=>String(n)!==String(codeN));
+      const cands=nums.filter(n=>!mc||String(n)!==String(codeN));
       if (cands.length) {
         const last=cands[cands.length-1];
-        if (last>=10) count=last;
+        if (last>=10 || cands.length===1) count=last; // 单个数字也采纳（如 "D02 2"）
+      } else if (nums.length===1 && nums[0]>=10) {
+        count=nums[0]; // 纯数字行
       }
     }
   }
@@ -1438,7 +1893,8 @@ function updateLegendInfo() {
   const items=state.legend||[];
   let total=0, known=0;
   items.forEach(it=>{ if (it.count!=null&&it.count!=='') { total+=Number(it.count)||0; known++; } });
-  gridInfo.textContent=`底部色标图例 · ${items.length} 种色号${known?` · 合计 ${total} 颗豆`:''}`;
+  const gridTxt=legendGridInfo?`（已定位网格图纸 ${legendGridInfo.gw}×${legendGridInfo.gh}）`:'';
+  gridInfo.textContent=`底部色标图例${gridTxt} · ${items.length} 种色号${known?` · 合计 ${total} 颗豆`:''}`;
 }
 
 function renderLegend() {
@@ -1448,7 +1904,8 @@ function renderLegend() {
     const row=document.createElement('div'); row.className='legend-item';
     const sw=document.createElement('div'); sw.className='swatch'; sw.style.background=it.hex;
     const code=document.createElement('span'); code.className='legend-code'; code.textContent=it.code;
-    const hexS=document.createElement('span'); hexS.className='legend-hex'; hexS.textContent=it.hex;
+    const hexS=document.createElement('span'); hexS.className='legend-hex'; hexS.textContent=it.unmatched?'未匹配色板':it.hex;
+    hexS.style.color=it.unmatched?'#F59E0B':'#9CA3AF';
     const inp=document.createElement('input');
     inp.type='number'; inp.min=0; inp.inputMode='numeric'; inp.className='legend-count';
     inp.value=it.count==null||it.count===''?'':it.count;
@@ -1465,12 +1922,26 @@ function renderLegend() {
 
 function generateLegend() {
   if (!state.sourceImage) { toast('请先选择图片'); return; }
-  const swatches=extractLegendSwatches();
-  if (!swatches) { toast('未在图片底部找到色标图例，请确认图例位于图片最底部'); return; }
+  let info;
+  try {
+    info=extractLegendStrip();
+  } catch (err) {
+    console.error(err);
+    toast('图例定位出错，请检查图纸是否清晰，或换个图片试试');
+    return;
+  }
+  if (!info) { toast('未定位到色标图例。请确认图纸网格线清晰、图例与图纸在同一张图内（通常在下方或上方）'); return; }
   generateBtn.disabled=true;
   generateBtn.textContent='识别图例颜色…';
   state.result=null;
-  state.legend=swatches.map(s=>({ hex:s.hex, code:getColorKeyByHex(s.hex,state.colorSystem), count:null }));
+  const {d,W,H,strip}=info;
+  const blocks=strip.blocks||[];
+
+  // 先按色块像素色渲染占位列表，OCR 完成后按"文字色号→色板"覆盖
+  state.legend=blocks.map(b=>{
+    const hex=matchRgb(Math.round(b.r),Math.round(b.g),Math.round(b.b),state.match);
+    return { hex, code:getColorKeyByHex(hex,state.colorSystem), count:null };
+  });
   state.legend=mergeLegend(state.legend);
   statsBlock.hidden=true;
   auditBlock.hidden=true;
@@ -1478,31 +1949,90 @@ function generateLegend() {
   actionBar.hidden=false;
   showGridResultView(false);
   renderLegend();
+
   (async()=>{
     try {
-      const worker=await getOcrWorker();
-      for (let i=0;i<swatches.length;i++) {
-        if (!swatches[i].rect) continue;
-        generateBtn.textContent=`识别文字 ${i+1}/${swatches.length}…`;
-        await new Promise(r=>setTimeout(r,0));
-        const text=await ocrCrop(worker,legendCanvas,swatches[i].rect);
-        const parsed=parseLegendText(text);
-        if (parsed.count!=null) {
-          const hit=state.legend.find(it=>it.hex.toUpperCase()===swatches[i].hex.toUpperCase());
-          if (hit) hit.count=parsed.count;
+      const rects=makeOcrRects(strip,W);
+      let texts=[];
+      let itemsAll=[]; // 各引擎返回的带坐标检测框（用于相对位置配对）
+      // 引擎1：浏览器 PP-OCRv4（整图一次识别，无需服务，GitHub Pages 可用）
+      if (state.opts.browserOcr) {
+        try {
+          if (window.PPOCR) PPOCR.setWatermark(state.opts.watermark ? 1 : 0);
+          const r=await browserOcr(legendCanvas,p=>{generateBtn.textContent=p;});
+          texts.push(...r.texts);
+          itemsAll.push(...r.items);
+          console.log('浏览器PP-OCR:',texts);
+        } catch (err) {
+          console.warn('浏览器 PP-OCR 失败，尝试下一引擎',err);
+          texts=[];
+          itemsAll=[];
         }
-        if (parsed.code) {
-          const h=findHexByCode(parsed.code);
-          if (h) {
-            const hit=state.legend.find(it=>it.hex.toUpperCase()===swatches[i].hex.toUpperCase());
-            if (hit) { hit.hex=h; hit.code=parsed.code; }
-          }
-        }
-        renderLegend();
-        await new Promise(r=>setTimeout(r,0));
       }
-      toast('图例识别完成，请核对数量');
+      // 引擎2：本地 RapidOCR 服务（可选增强，需本机启动 ocr_server.py）
+      if (!texts.length && state.opts.localOcr && await localOcrHealth()) {
+        try {
+          for (let i=0;i<rects.length;i++) {
+            generateBtn.textContent=`本地OCR ${i+1}/${rects.length}…`;
+            const {text,items}=await ocrRegionLocal(legendCanvas,rects[i]);
+            if (text) texts.push(text);
+            if (items&&items.length) itemsAll.push(...items);
+            console.log('本地OCR 段'+i+':',text);
+            await new Promise(r=>setTimeout(r,0));
+          }
+        } catch (err) {
+          console.warn('本地 OCR 失败，回退 tesseract',err);
+          texts=[];
+          itemsAll=[];
+        }
+      }
+      // 引擎3：tesseract.js 兜底
+      if (!texts.length) {
+        const worker=await getOcrWorker();
+        for (let i=0;i<rects.length;i++) {
+          generateBtn.textContent=`识别文字 ${i+1}/${rects.length}…`;
+          const {text}=await ocrRegionBoth(worker,legendCanvas,rects[i]);
+          if (text) texts.push(text);
+          console.log('OCR 段'+i+':',text);
+          await new Promise(r=>setTimeout(r,0));
+        }
+      }
+      // 主路径：文字色号→色板精确颜色 + 数量（含 OCR 常见混淆容错）
+      // 文字识别优先：色板匹配不上的色号也保留展示（unmatched），不因颜色环节吞掉识别结果
+      // 优先按检测框相对位置配对（坐标版），失败再回退按文本流解析
+      let pairs=[];
+      if (itemsAll.length>=2) { try { pairs=buildPairsFromItems(itemsAll); } catch (e) { pairs=[]; } }
+      if (!pairs.length) pairs=parseLegendPairs(texts.join('\n'));
+      const ocrItems=[];
+      pairs.forEach(p=>{
+        const h=matchCodeFuzzy(p.code);
+        const cnt=(p.count!=null&&p.count>=1)?p.count:null;
+        if (h) ocrItems.push({ hex:h, code:getColorKeyByHex(h,state.colorSystem), count:cnt });
+        else ocrItems.push({ hex:'#CCCCCC', code:String(p.code||'?').toUpperCase().trim(), count:cnt, unmatched:true });
+      });
+      if (ocrItems.length) {
+        const used=new Set(ocrItems.map(it=>normalizeCode(it.code)));
+        const merged=[...ocrItems];
+        blocks.forEach(b=>{ // 像素色兜底补漏（OCR 漏读的色块）
+          const hex=matchRgb(Math.round(b.r),Math.round(b.g),Math.round(b.b),state.match);
+          const code=getColorKeyByHex(hex,state.colorSystem);
+          if (!used.has(normalizeCode(code))) { used.add(normalizeCode(code)); merged.push({ hex, code, count:null }); }
+        });
+        state.legend=merged;
+      } else {
+        state.legend=blocks.map(b=>{
+          const hex=matchRgb(Math.round(b.r),Math.round(b.g),Math.round(b.b),state.match);
+          return { hex, code:getColorKeyByHex(hex,state.colorSystem), count:null };
+        });
+      }
+      state.legend=mergeLegend(state.legend);
+      renderLegend();
+      const unmatched=ocrItems.filter(it=>it.unmatched).length;
+      toast(ocrItems.length
+        ? (unmatched? `文字识别完成：${unmatched} 个色号未匹配到所选色板，颜色待核对，文字与数量已保留`:'图例识别完成：文字色号已匹配色板颜色')
+        : '未识别到图例文字，已按色块颜色生成清单，数量可手动填写');
     } catch (err) {
+      console.error(err);
       toast('OCR 未加载成功，已按颜色生成清单，数量可手动填写');
     } finally {
       generateBtn.disabled=false;
@@ -1609,5 +2139,6 @@ $('exportCsv').addEventListener('click',exportCsv);
 
 refresh();
 </script>
+<script src="ocr-pp.js"></script>
 </body>
 </html>
