@@ -2478,8 +2478,8 @@ function drawCrop() {
   ctx.strokeRect(s.x-0.75,s.y-0.75,s.w+1.5,s.h+1.5);
 }
 function cropHitHandle(p) {
-  // 微信式：命中边框线（容差 R）即可调整，四角优先；整框内部才允许移动
-  const s=cropState.sel, R=12;
+  // 边框线命中：±R 内即调整对应边/角；只有距四边都超过 R 的内部区域才整框移动
+  const s=cropState.sel, R=16;
   const l=s.x, r=s.x+s.w, t=s.y, b=s.y+s.h;
   const nearL=p.x>=l-R&&p.x<=l+R, nearR=p.x>=r-R&&p.x<=r+R;
   const nearT=p.y>=t-R&&p.y<=t+R, nearB=p.y>=b-R&&p.y<=b+R;
@@ -2492,7 +2492,7 @@ function cropHitHandle(p) {
   if (nearR&&inY) return 'e';
   if (nearT&&inX) return 'n';
   if (nearB&&inX) return 's';
-  if (inX&&inY) return 'move';
+  if (p.x>l+R&&p.x<r-R&&p.y>t+R&&p.y<b-R) return 'move';
   return null;
 }
 cropCanvas.addEventListener('pointerdown',e=>{
@@ -2507,9 +2507,10 @@ cropCanvas.addEventListener('pointermove',e=>{
   const d=cropState.drag, p=cropPoint(e);
   const cur=d.sel;
   const rawDx=p.x-d.p0.x, rawDy=p.y-d.p0.y;
-  if (Math.abs(rawDx)<4 && Math.abs(rawDy)<4) return; // 启动容差：点击/轻晃不触发
-  // 灵敏度 1/10：实拖 10px 才动 1px，极缓慢精确
-  const dx=rawDx*0.1, dy=rawDy*0.1;
+  if (Math.abs(rawDx)<2 && Math.abs(rawDy)<2) return; // 启动容差：点击不误触，拖动能即时响应
+  // 整框移动 ×0.4（跟手但可精确控制）；边框缩放 ×0.05（即 1/20，精细调大小）
+  const ratio=d.hit==='move'?0.4:0.05;
+  const dx=rawDx*ratio, dy=rawDy*ratio;
   if (d.hit==='move') {
     d.sel={...cur, x:Math.max(0,Math.min(cropState.w-cur.w,cur.x+dx)), y:Math.max(0,Math.min(cropState.h-cur.h,cur.y+dy))};
   } else if (d.hit) {
