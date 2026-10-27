@@ -2509,7 +2509,7 @@ cropCanvas.addEventListener('pointermove',e=>{
   const rawDx=p.x-d.p0.x, rawDy=p.y-d.p0.y;
   if (Math.abs(rawDx)<2 && Math.abs(rawDy)<2) return; // 启动容差：点击不误触，拖动能即时响应
   // 整框移动 ×0.4（跟手但可精确控制）；边框缩放 ×0.05（即 1/20，精细调大小）
-  const ratio=d.hit==='move'?0.4:0.05;
+  const ratio=d.hit==='move'?0.1:0.01;
   const dx=rawDx*ratio, dy=rawDy*ratio;
   if (d.hit==='move') {
     d.sel={...cur, x:Math.max(0,Math.min(cropState.w-cur.w,cur.x+dx)), y:Math.max(0,Math.min(cropState.h-cur.h,cur.y+dy))};
