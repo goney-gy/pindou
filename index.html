@@ -2469,23 +2469,30 @@ function drawCrop() {
   ctx.fillRect(0,s.y+s.h,cs.w,cs.h-(s.y+s.h));
   ctx.fillRect(0,s.y,s.x,s.h);
   ctx.fillRect(s.x+s.w,s.y,cs.w-(s.x+s.w),s.h);
+  // 微信式：纯边框（白线 + 外侧半透明黑线增强对比），无点状手柄
+  ctx.strokeStyle='rgba(0,0,0,0.35)';
+  ctx.lineWidth=3;
+  ctx.strokeRect(s.x-1.5,s.y-1.5,s.w+3,s.h+3);
   ctx.strokeStyle='#FFFFFF';
   ctx.lineWidth=1.5;
   ctx.strokeRect(s.x-0.75,s.y-0.75,s.w+1.5,s.h+1.5);
-  ctx.fillStyle='#FFFFFF';
-  const hs=[[s.x,s.y],[s.x+s.w/2,s.y],[s.x+s.w,s.y],[s.x+s.w,s.y+s.h/2],[s.x+s.w,s.y+s.h],[s.x+s.w/2,s.y+s.h],[s.x,s.y+s.h],[s.x,s.y+s.h/2]];
-  hs.forEach(([hx,hy])=>{
-    ctx.fillRect(hx-6,hy-6,12,12);
-    ctx.strokeStyle='#4338CA';
-    ctx.lineWidth=1;
-    ctx.strokeRect(hx-6,hy-6,12,12);
-  });
 }
 function cropHitHandle(p) {
-  const s=cropState.sel, R=20; // 手柄命中半径较大，避免误触整框移动
-  const hs=[['nw',s.x,s.y],['n',s.x+s.w/2,s.y],['ne',s.x+s.w,s.y],['e',s.x+s.w,s.y+s.h/2],['se',s.x+s.w,s.y+s.h],['s',s.x+s.w/2,s.y+s.h],['sw',s.x,s.y+s.h],['w',s.x,s.y+s.h/2]];
-  for (const [k,hx,hy] of hs) if (Math.abs(p.x-hx)<=R && Math.abs(p.y-hy)<=R) return k;
-  if (p.x>=s.x&&p.x<=s.x+s.w&&p.y>=s.y&&p.y<=s.y+s.h) return 'move';
+  // 微信式：命中边框线（容差 R）即可调整，四角优先；整框内部才允许移动
+  const s=cropState.sel, R=12;
+  const l=s.x, r=s.x+s.w, t=s.y, b=s.y+s.h;
+  const nearL=p.x>=l-R&&p.x<=l+R, nearR=p.x>=r-R&&p.x<=r+R;
+  const nearT=p.y>=t-R&&p.y<=t+R, nearB=p.y>=b-R&&p.y<=b+R;
+  const inX=p.x>=l&&p.x<=r, inY=p.y>=t&&p.y<=b;
+  if (nearL&&nearT) return 'nw';
+  if (nearR&&nearT) return 'ne';
+  if (nearL&&nearB) return 'sw';
+  if (nearR&&nearB) return 'se';
+  if (nearL&&inY) return 'w';
+  if (nearR&&inY) return 'e';
+  if (nearT&&inX) return 'n';
+  if (nearB&&inX) return 's';
+  if (inX&&inY) return 'move';
   return null;
 }
 cropCanvas.addEventListener('pointerdown',e=>{
@@ -2500,14 +2507,13 @@ cropCanvas.addEventListener('pointermove',e=>{
   const d=cropState.drag, p=cropPoint(e);
   const cur=d.sel;
   const rawDx=p.x-d.p0.x, rawDy=p.y-d.p0.y;
-  if (Math.abs(rawDx)<14 && Math.abs(rawDy)<14) return; // 启动容差 14px：点击/晃动完全不触发
-  // 十分缓和：整框移动减速 0.5 倍，手柄缩放减速 0.3 倍
-  const dx=rawDx*(d.hit&&d.hit!=='move'?0.3:(d.hit==='move'?0.5:1));
-  const dy=rawDy*(d.hit&&d.hit!=='move'?0.3:(d.hit==='move'?0.5:1));
+  if (Math.abs(rawDx)<4 && Math.abs(rawDy)<4) return; // 启动容差：点击/轻晃不触发
+  // 微信式：1:1 跟手（所见即所得，不再减速）
+  const dx=rawDx, dy=rawDy;
   if (d.hit==='move') {
     d.sel={...cur, x:Math.max(0,Math.min(cropState.w-cur.w,cur.x+dx)), y:Math.max(0,Math.min(cropState.h-cur.h,cur.y+dy))};
   } else if (d.hit) {
-    const minSize=20;
+    const minSize=16;
     let {x,y,w,h}=cur, m=d.hit;
     if (m==='e'||m==='se'||m==='ne') w=Math.max(minSize,Math.min(cropState.w-x,cur.w+dx));
     if (m==='s'||m==='se'||m==='sw') h=Math.max(minSize,Math.min(cropState.h-y,cur.h+dy));
