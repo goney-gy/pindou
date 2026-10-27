@@ -2500,14 +2500,14 @@ cropCanvas.addEventListener('pointermove',e=>{
   const d=cropState.drag, p=cropPoint(e);
   const cur=d.sel;
   const rawDx=p.x-d.p0.x, rawDy=p.y-d.p0.y;
-  if (Math.abs(rawDx)<8 && Math.abs(rawDy)<8) return; // 拖拽启动容差加大：点击/轻晃不触发
-  // 手柄缩放减速 0.6 倍，调整更平缓；整框移动保持 1:1 跟手
-  const dx=d.hit&&d.hit!=='move'?rawDx*0.6:rawDx;
-  const dy=d.hit&&d.hit!=='move'?rawDy*0.6:rawDy;
+  if (Math.abs(rawDx)<14 && Math.abs(rawDy)<14) return; // 启动容差 14px：点击/晃动完全不触发
+  // 十分缓和：整框移动减速 0.5 倍，手柄缩放减速 0.3 倍
+  const dx=rawDx*(d.hit&&d.hit!=='move'?0.3:(d.hit==='move'?0.5:1));
+  const dy=rawDy*(d.hit&&d.hit!=='move'?0.3:(d.hit==='move'?0.5:1));
   if (d.hit==='move') {
     d.sel={...cur, x:Math.max(0,Math.min(cropState.w-cur.w,cur.x+dx)), y:Math.max(0,Math.min(cropState.h-cur.h,cur.y+dy))};
   } else if (d.hit) {
-    const minSize=16;
+    const minSize=20;
     let {x,y,w,h}=cur, m=d.hit;
     if (m==='e'||m==='se'||m==='ne') w=Math.max(minSize,Math.min(cropState.w-x,cur.w+dx));
     if (m==='s'||m==='se'||m==='sw') h=Math.max(minSize,Math.min(cropState.h-y,cur.h+dy));
