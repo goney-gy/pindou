@@ -2508,8 +2508,8 @@ cropCanvas.addEventListener('pointermove',e=>{
   const cur=d.sel;
   const rawDx=p.x-d.p0.x, rawDy=p.y-d.p0.y;
   if (Math.abs(rawDx)<4 && Math.abs(rawDy)<4) return; // 启动容差：点击/轻晃不触发
-  // 微信式：1:1 跟手（所见即所得，不再减速）
-  const dx=rawDx, dy=rawDy;
+  // 灵敏度 1/10：实拖 10px 才动 1px，极缓慢精确
+  const dx=rawDx*0.1, dy=rawDy*0.1;
   if (d.hit==='move') {
     d.sel={...cur, x:Math.max(0,Math.min(cropState.w-cur.w,cur.x+dx)), y:Math.max(0,Math.min(cropState.h-cur.h,cur.y+dy))};
   } else if (d.hit) {
