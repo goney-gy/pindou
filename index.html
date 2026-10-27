@@ -2475,14 +2475,14 @@ function drawCrop() {
   ctx.fillStyle='#FFFFFF';
   const hs=[[s.x,s.y],[s.x+s.w/2,s.y],[s.x+s.w,s.y],[s.x+s.w,s.y+s.h/2],[s.x+s.w,s.y+s.h],[s.x+s.w/2,s.y+s.h],[s.x,s.y+s.h],[s.x,s.y+s.h/2]];
   hs.forEach(([hx,hy])=>{
-    ctx.fillRect(hx-3.5,hy-3.5,7,7);
+    ctx.fillRect(hx-6,hy-6,12,12);
     ctx.strokeStyle='#4338CA';
     ctx.lineWidth=1;
-    ctx.strokeRect(hx-3.5,hy-3.5,7,7);
+    ctx.strokeRect(hx-6,hy-6,12,12);
   });
 }
 function cropHitHandle(p) {
-  const s=cropState.sel, R=8;
+  const s=cropState.sel, R=20; // 手柄命中半径较大，避免误触整框移动
   const hs=[['nw',s.x,s.y],['n',s.x+s.w/2,s.y],['ne',s.x+s.w,s.y],['e',s.x+s.w,s.y+s.h/2],['se',s.x+s.w,s.y+s.h],['s',s.x+s.w/2,s.y+s.h],['sw',s.x,s.y+s.h],['w',s.x,s.y+s.h/2]];
   for (const [k,hx,hy] of hs) if (Math.abs(p.x-hx)<=R && Math.abs(p.y-hy)<=R) return k;
   if (p.x>=s.x&&p.x<=s.x+s.w&&p.y>=s.y&&p.y<=s.y+s.h) return 'move';
@@ -2498,11 +2498,16 @@ cropCanvas.addEventListener('pointermove',e=>{
   if (!cropState||!cropState.drag) return;
   e.preventDefault();
   const d=cropState.drag, p=cropPoint(e);
-  const cur=d.sel, dx=p.x-d.p0.x, dy=p.y-d.p0.y;
+  const cur=d.sel;
+  const rawDx=p.x-d.p0.x, rawDy=p.y-d.p0.y;
+  if (Math.abs(rawDx)<8 && Math.abs(rawDy)<8) return; // 拖拽启动容差加大：点击/轻晃不触发
+  // 手柄缩放减速 0.6 倍，调整更平缓；整框移动保持 1:1 跟手
+  const dx=d.hit&&d.hit!=='move'?rawDx*0.6:rawDx;
+  const dy=d.hit&&d.hit!=='move'?rawDy*0.6:rawDy;
   if (d.hit==='move') {
     d.sel={...cur, x:Math.max(0,Math.min(cropState.w-cur.w,cur.x+dx)), y:Math.max(0,Math.min(cropState.h-cur.h,cur.y+dy))};
   } else if (d.hit) {
-    const minSize=8;
+    const minSize=16;
     let {x,y,w,h}=cur, m=d.hit;
     if (m==='e'||m==='se'||m==='ne') w=Math.max(minSize,Math.min(cropState.w-x,cur.w+dx));
     if (m==='s'||m==='se'||m==='sw') h=Math.max(minSize,Math.min(cropState.h-y,cur.h+dy));
